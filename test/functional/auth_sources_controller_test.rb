@@ -1,5 +1,7 @@
+# frozen_string_literal: true
+
 # Redmine - project management software
-# Copyright (C) 2006-2017  Jean-Philippe Lang
+# Copyright (C) 2006-2020  Jean-Philippe Lang
 #
 # This program is free software; you can redistribute it and/or
 # modify it under the terms of the GNU General Public License
@@ -159,6 +161,7 @@ class AuthSourcesControllerTest < Redmine::ControllerTest
           :id => 1
         }
       assert_redirected_to '/auth_sources'
+      assert_equal 'This authentication mode is in use and cannot be deleted.', flash[:error]
     end
   end
 
@@ -185,16 +188,19 @@ class AuthSourcesControllerTest < Redmine::ControllerTest
   end
 
   def test_autocomplete_for_new_user
-    AuthSource.expects(:search).with('foo').returns([
-      {:login => 'foo1', :firstname => 'John', :lastname => 'Smith', :mail => 'foo1@example.net', :auth_source_id => 1},
-      {:login => 'Smith', :firstname => 'John', :lastname => 'Doe', :mail => 'foo2@example.net', :auth_source_id => 1}
-    ])
-
+    AuthSource.expects(:search).with('foo').returns(
+      [
+        {:login => 'foo1', :firstname => 'John', :lastname => 'Smith',
+         :mail => 'foo1@example.net', :auth_source_id => 1},
+        {:login => 'Smith', :firstname => 'John', :lastname => 'Doe',
+         :mail => 'foo2@example.net', :auth_source_id => 1}
+      ]
+    )
     get :autocomplete_for_new_user, :params => {
         :term => 'foo'
       }
     assert_response :success
-    assert_equal 'application/json', response.content_type
+    assert_equal 'application/json', response.media_type
     json = ActiveSupport::JSON.decode(response.body)
     assert_kind_of Array, json
     assert_equal 2, json.size

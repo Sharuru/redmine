@@ -1,5 +1,7 @@
+# frozen_string_literal: true
+
 # Redmine - project management software
-# Copyright (C) 2006-2017  Jean-Philippe Lang
+# Copyright (C) 2006-2020  Jean-Philippe Lang
 #
 # This program is free software; you can redistribute it and/or
 # modify it under the terms of the GNU General Public License
@@ -35,7 +37,7 @@ class News < ActiveRecord::Base
   acts_as_watchable
 
   after_create :add_author_as_watcher
-  after_create :send_notification
+  after_create_commit :send_notification
 
   scope :visible, lambda {|*args|
     joins(:project).
@@ -91,7 +93,7 @@ class News < ActiveRecord::Base
 
   def send_notification
     if Setting.notified_events.include?('news_added')
-      Mailer.news_added(self).deliver
+      Mailer.deliver_news_added(self)
     end
   end
 end

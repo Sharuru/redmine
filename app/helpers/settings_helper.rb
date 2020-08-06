@@ -1,7 +1,7 @@
-# encoding: utf-8
-#
+# frozen_string_literal: true
+
 # Redmine - project management software
-# Copyright (C) 2006-2017  Jean-Philippe Lang
+# Copyright (C) 2006-2020  Jean-Philippe Lang
 #
 # This program is free software; you can redistribute it and/or
 # modify it under the terms of the GNU General Public License
@@ -19,18 +19,26 @@
 
 module SettingsHelper
   def administration_settings_tabs
-    tabs = [{:name => 'general', :partial => 'settings/general', :label => :label_general},
-            {:name => 'display', :partial => 'settings/display', :label => :label_display},
-            {:name => 'authentication', :partial => 'settings/authentication', :label => :label_authentication},
-            {:name => 'api', :partial => 'settings/api', :label => :label_api},
-            {:name => 'projects', :partial => 'settings/projects', :label => :label_project_plural},
-            {:name => 'issues', :partial => 'settings/issues', :label => :label_issue_tracking},
-            {:name => 'timelog', :partial => 'settings/timelog', :label => :label_time_tracking},
-            {:name => 'attachments', :partial => 'settings/attachments', :label => :label_attachment_plural},
-            {:name => 'notifications', :partial => 'settings/notifications', :label => :field_mail_notification},
-            {:name => 'mail_handler', :partial => 'settings/mail_handler', :label => :label_incoming_emails},
-            {:name => 'repositories', :partial => 'settings/repositories', :label => :label_repository_plural}
-            ]
+    tabs =
+      [
+        {:name => 'general', :partial => 'settings/general', :label => :label_general},
+        {:name => 'display', :partial => 'settings/display', :label => :label_display},
+        {:name => 'authentication', :partial => 'settings/authentication',
+         :label => :label_authentication},
+        {:name => 'api', :partial => 'settings/api', :label => :label_api},
+        {:name => 'projects', :partial => 'settings/projects', :label => :label_project_plural},
+        {:name => 'users', :partial => 'settings/users', :label => :label_user_plural},
+        {:name => 'issues', :partial => 'settings/issues', :label => :label_issue_tracking},
+        {:name => 'timelog', :partial => 'settings/timelog', :label => :label_time_tracking},
+        {:name => 'attachments', :partial => 'settings/attachments',
+         :label => :label_attachment_plural},
+        {:name => 'notifications', :partial => 'settings/notifications',
+         :label => :field_mail_notification},
+        {:name => 'mail_handler', :partial => 'settings/mail_handler',
+         :label => :label_incoming_emails},
+        {:name => 'repositories', :partial => 'settings/repositories',
+         :label => :label_repository_plural}
+      ]
   end
 
   def render_settings_error(errors)
@@ -77,7 +85,7 @@ module SettingsHelper
              :id => nil
            ) + text.to_s,
           :class => (options[:inline] ? 'inline' : 'block')
-         )
+        )
       end.join.html_safe
   end
 
@@ -109,23 +117,22 @@ module SettingsHelper
 
   # Renders a notification field for a Redmine::Notifiable option
   def notification_field(notifiable)
-    tag_data = notifiable.parent.present? ?
-      {:parent_notifiable => notifiable.parent} :
-      {:disables => "input[data-parent-notifiable=#{notifiable.name}]"}
-
+    tag_data =
+      if notifiable.parent.present?
+        {:parent_notifiable => notifiable.parent}
+      else
+        {:disables => "input[data-parent-notifiable=#{notifiable.name}]"}
+      end
     tag = check_box_tag('settings[notified_events][]',
-      notifiable.name,
-      setting_value('notified_events').include?(notifiable.name),
-      :id => nil,
-      :data => tag_data)
-
+                        notifiable.name,
+                        setting_value('notified_events').include?(notifiable.name),
+                        :id => nil,
+                        :data => tag_data)
     text = l_or_humanize(notifiable.name, :prefix => 'label_')
-
     options = {}
     if notifiable.parent.present?
       options[:class] = "parent"
     end
-
     content_tag(:label, tag + text, options)
   end
 
@@ -206,5 +213,14 @@ module SettingsHelper
       end
       ["#{today} (#{format})", f]
     end
+  end
+
+  def gravatar_default_setting_options
+    [['Identicons', 'identicon'],
+     ['Monster ids', 'monsterid'],
+     ['Mystery man', 'mm'],
+     ['Retro', 'retro'],
+     ['Robohash', 'robohash'],
+     ['Wavatars', 'wavatar']]
   end
 end

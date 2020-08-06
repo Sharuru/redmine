@@ -1,5 +1,7 @@
+# frozen_string_literal: true
+
 # Redmine - project management software
-# Copyright (C) 2006-2017  Jean-Philippe Lang
+# Copyright (C) 2006-2020  Jean-Philippe Lang
 #
 # This program is free software; you can redistribute it and/or
 # modify it under the terms of the GNU General Public License
@@ -28,12 +30,14 @@ class ActivitiesControllerTest < Redmine::ControllerTest
            :enabled_modules,
            :journals, :journal_details
 
-
   def test_project_index
-    get :index, :params => {
+    get(
+      :index,
+      :params => {
         :id => 1,
         :with_subprojects => 0
       }
+    )
     assert_response :success
 
     assert_select 'h3', :text => /#{2.days.ago.to_date.day}/
@@ -41,20 +45,22 @@ class ActivitiesControllerTest < Redmine::ControllerTest
   end
 
   def test_project_index_with_invalid_project_id_should_respond_404
-    get :index, :params => {
-        :id => 299
-      }
+    get(:index, :params => {:id => 299})
     assert_response 404
   end
 
   def test_previous_project_index
-    get :index, :params => {
+    @request.session[:user_id] = 1
+    get(
+      :index,
+      :params => {
         :id => 1,
         :from => 2.days.ago.to_date
       }
+    )
     assert_response :success
 
-    assert_select 'h3', :text => /#{3.days.ago.to_date.day}/
+    assert_select 'h3', :text => /#{User.current.time_to_date(3.days.ago).day}/
     assert_select 'dl dt.issue a', :text => /Cannot print recipes/
   end
 
@@ -72,9 +78,12 @@ class ActivitiesControllerTest < Redmine::ControllerTest
 
   def test_user_index
     @request.session[:user_id] = 1
-    get :index, :params => {
+    get(
+      :index,
+      :params => {
         :user_id => 2
       }
+    )
     assert_response :success
 
     assert_select 'h2 a[href="/users/2"]', :text => 'John Smith'
@@ -87,71 +96,87 @@ class ActivitiesControllerTest < Redmine::ControllerTest
   end
 
   def test_user_index_with_invalid_user_id_should_respond_404
-    get :index, :params => {
+    get(
+      :index,
+      :params => {
         :user_id => 299
       }
+    )
     assert_response 404
   end
 
   def test_index_atom_feed
-    get :index, :params => {
-        :format => 'atom',
-        :with_subprojects => 0
-      }
+    with_settings :protocol => 'http', :host_name => 'redmine.test' do
+      get(
+        :index,
+        :params => {
+          :format => 'atom',
+          :with_subprojects => 0
+        }
+      )
+    end
     assert_response :success
 
     assert_select 'feed' do
-      assert_select 'link[rel=self][href=?]', 'http://test.host/activity.atom?with_subprojects=0'
-      assert_select 'link[rel=alternate][href=?]', 'http://test.host/activity?with_subprojects=0'
+      assert_select 'link[rel=self][href=?]', 'http://redmine.test/activity.atom?with_subprojects=0'
+      assert_select 'link[rel=alternate][href=?]', 'http://redmine.test/activity?with_subprojects=0'
       assert_select 'entry' do
-        assert_select 'link[href=?]', 'http://test.host/issues/11'
+        assert_select 'link[href=?]', 'http://redmine.test/issues/11'
       end
     end
   end
 
   def test_index_atom_feed_with_explicit_selection
-    get :index, :params => {
-        :format => 'atom',
-        :with_subprojects => 0,
-        :show_changesets => 1,
-        :show_documents => 1,
-        :show_files => 1,
-        :show_issues => 1,
-        :show_messages => 1,
-        :show_news => 1,
-        :show_time_entries => 1,
-        :show_wiki_edits => 1
-      }
-
+    with_settings :protocol => 'https', :host_name => 'redmine.example' do
+      get(
+        :index,
+        :params => {
+          :format => 'atom',
+          :with_subprojects => 0,
+          :show_changesets => 1,
+          :show_documents => 1,
+          :show_files => 1,
+          :show_issues => 1,
+          :show_messages => 1,
+          :show_news => 1,
+          :show_time_entries => 1,
+          :show_wiki_edits => 1
+        }
+      )
+    end
     assert_response :success
 
     assert_select 'feed' do
-      assert_select 'link[rel=self][href=?]', 'http://test.host/activity.atom?show_changesets=1&show_documents=1&show_files=1&show_issues=1&show_messages=1&show_news=1&show_time_entries=1&show_wiki_edits=1&with_subprojects=0'
-      assert_select 'link[rel=alternate][href=?]', 'http://test.host/activity?show_changesets=1&show_documents=1&show_files=1&show_issues=1&show_messages=1&show_news=1&show_time_entries=1&show_wiki_edits=1&with_subprojects=0'
+      assert_select 'link[rel=self][href=?]', 'https://redmine.example/activity.atom?show_changesets=1&show_documents=1&show_files=1&show_issues=1&show_messages=1&show_news=1&show_time_entries=1&show_wiki_edits=1&with_subprojects=0'
+      assert_select 'link[rel=alternate][href=?]', 'https://redmine.example/activity?show_changesets=1&show_documents=1&show_files=1&show_issues=1&show_messages=1&show_news=1&show_time_entries=1&show_wiki_edits=1&with_subprojects=0'
       assert_select 'entry' do
-        assert_select 'link[href=?]', 'http://test.host/issues/11'
+        assert_select 'link[href=?]', 'https://redmine.example/issues/11'
       end
     end
   end
 
   def test_index_atom_feed_with_one_item_type
     with_settings :default_language => 'en' do
-      get :index, :params => {
+      get(
+        :index,
+        :params => {
           :format => 'atom',
           :show_issues => '1'
         }
+      )
       assert_response :success
-  
       assert_select 'title', :text => /Issues/
     end
   end
 
   def test_index_atom_feed_with_user
-    get :index, :params => {
+    get(
+      :index,
+      :params => {
         :user_id => 2,
         :format => 'atom'
       }
-
+    )
     assert_response :success
     assert_select 'title', :text => "Redmine: #{User.find(2).name}"
   end
@@ -172,12 +197,14 @@ class ActivitiesControllerTest < Redmine::ControllerTest
 
   def test_index_with_submitted_scope_should_save_as_preference
     @request.session[:user_id] = 2
-
-    get :index, :params => {
+    get(
+      :index,
+      :params => {
         :show_issues => '1',
         :show_messages => '1',
         :submit => 'Apply'
       }
+    )
     assert_response :success
     assert_equal %w(issues messages), User.find(2).pref.activity_scope.sort
   end
@@ -209,10 +236,12 @@ class ActivitiesControllerTest < Redmine::ControllerTest
 
   def test_index_up_to_yesterday_should_show_next_page_link
     @request.session[:user_id] = 2
-
-    get :index, :params => {
-        :from => (User.find(2).today-1)
+    get(
+      :index,
+      :params => {
+        :from => (User.find(2).today - 1)
       }
+    )
     assert_response :success
     assert_select '.pagination a', :text => /Previous/
     assert_select '.pagination a', :text => /Next/

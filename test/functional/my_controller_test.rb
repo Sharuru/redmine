@@ -1,5 +1,7 @@
+# frozen_string_literal: true
+
 # Redmine - project management software
-# Copyright (C) 2006-2017  Jean-Philippe Lang
+# Copyright (C) 2006-2020  Jean-Philippe Lang
 #
 # This program is free software; you can redistribute it and/or
 # modify it under the terms of the GNU General Public License
@@ -18,8 +20,11 @@
 require File.expand_path('../../test_helper', __FILE__)
 
 class MyControllerTest < Redmine::ControllerTest
-  fixtures :users, :email_addresses, :user_preferences, :roles, :projects, :members, :member_roles,
-  :issues, :issue_statuses, :trackers, :enumerations, :custom_fields, :auth_sources, :queries
+  fixtures :users, :email_addresses, :user_preferences,
+           :roles, :projects, :members, :member_roles,
+           :issues, :issue_statuses, :trackers, :enumerations,
+           :custom_fields, :auth_sources, :queries, :enabled_modules,
+           :journals
 
   def setup
     @request.session[:user_id] = 2
@@ -95,7 +100,7 @@ class MyControllerTest < Redmine::ControllerTest
       assert_select 'table.issues.sort-by-due-date'
     end
   end
- 
+
   def test_page_with_issuequery_block_and_no_settings
     user = User.find(2)
     user.pref.my_page_layout = {'top' => ['issuequery']}
@@ -125,7 +130,7 @@ class MyControllerTest < Redmine::ControllerTest
     assert_select '#block-issuequery' do
       assert_select 'a[href=?]', "/issues?query_id=#{query.id}"
       # assert number of columns (columns from query + id column + checkbox column)
-      assert_select 'table.issues th', 6
+      assert_select 'table.issues th', 7
       # assert results limit
       assert_select 'table.issues tr.issue', 10
       assert_select 'table.issues td.assigned_to'
@@ -145,7 +150,7 @@ class MyControllerTest < Redmine::ControllerTest
     assert_select '#block-issuequery' do
       assert_select 'a[href=?]', "/projects/ecookbook/issues?query_id=#{query.id}"
       # assert number of columns (columns from query + id column + checkbox column)
-      assert_select 'table.issues th', 6
+      assert_select 'table.issues th', 7
       # assert results limit
       assert_select 'table.issues tr.issue', 10
       assert_select 'table.issues td.assigned_to'
@@ -164,7 +169,7 @@ class MyControllerTest < Redmine::ControllerTest
 
     assert_select '#block-issuequery' do
       # assert number of columns (columns from query + id column + checkbox column)
-      assert_select 'table.issues th', 4
+      assert_select 'table.issues th', 5
       assert_select 'table.issues th', :text => 'Due date'
     end
   end
@@ -198,6 +203,50 @@ class MyControllerTest < Redmine::ControllerTest
     end
   end
 
+  def test_page_with_activity
+    user = User.find(2)
+    user.pref.my_page_layout = {'top' => ['activity']}
+    user.pref.time_zone = 'UTC'
+    user.pref.save!
+
+    get :page
+    assert_response :success
+
+    assert_select 'div#block-activity' do
+      assert_select 'h3' do
+        assert_select 'a[href=?]', activity_path(from: User.current.today, user_id: user.id),  :text => 'Activity'
+      end
+      assert_select 'div#activity' do
+        assert_select 'dt', 10
+      end
+    end
+  end
+
+  def test_page_with_updated_issues_block
+    preferences = User.find(2).pref
+    preferences.my_page_layout = {'top' => ['issuesupdatedbyme']}
+    preferences.my_page_settings = {'issuesupdatedbyme' => {}}
+    preferences.save!
+
+    project = Project.find(3)
+    project.close
+
+    get :page
+
+    assert_response :success
+    assert_select '#block-issuesupdatedbyme' do
+      report_url = CGI.unescape(css_select('h3 a').first.attr('href'))
+      assert_match 'f[]=project.status', report_url
+      assert_match 'v[project.status][]=1', report_url
+      assert_match 'f[]=updated_by', report_url
+      assert_match 'v[updated_by][]=me', report_url
+
+      assert_select 'table.issues tbody tr', 2
+      assert_select 'table.issues tbody tr[id=?]', 'issue-1', 1, :title => 'Cannot print recipes'
+      assert_select 'table.issues tbody tr[id=?]', 'issue-14', 0
+    end
+  end
+
   def test_page_with_all_blocks
     blocks = Redmine::MyPage.blocks.keys
     preferences = User.find(2).pref
@@ -207,6 +256,94 @@ class MyControllerTest < Redmine::ControllerTest
     get :page
     assert_response :success
     assert_select 'div.mypage-box', blocks.size
+  end
+
+  def test_page_with_assigned_issues_block_should_not_show_issues_from_closed_projects
+    preferences = User.find(2).pref
+    preferences.my_page_layout = {'top' => ['issuesassignedtome']}
+    preferences.my_page_settings = {'issuesassignedtome' => {}}
+    preferences.save!
+
+    issue = Issue.find(1)
+    issue.assigned_to = User.find(2)
+    issue.save!
+
+    project = Project.find(2)
+    project.close
+    project.save
+
+    get :page
+
+    assert_response :success
+    assert_select '#block-issuesassignedtome table.issues tbody' do
+      report_url = css_select('h3 a').map {|e| e.attr('href')}.first
+      assert_match 'f%5B%5D=project.status', report_url
+      assert_match 'v%5Bproject.status%5D%5B%5D=1', report_url
+
+      assert_select 'tr', 1
+      assert_select 'tr[id=?]', 'issue-1', 1, :title => 'Cannot print recipes'
+      assert_select 'tr[id=?]', 'issue-4', 0
+    end
+  end
+
+  def test_page_with_reported_issues_block_should_not_show_issues_from_closed_projects
+    preferences = User.find(2).pref
+    preferences.my_page_layout = {'top' => ['issuesreportedbyme']}
+    preferences.my_page_settings = {'issuesreportedbyme' => {}}
+    preferences.save!
+
+    issue = Issue.find(1)
+    issue.assigned_to = User.find(2)
+    issue.save!
+
+    project = Project.find(2)
+    project.close
+    project.save
+
+    get :page
+
+    assert_response :success
+    assert_select '#block-issuesreportedbyme' do
+      report_url = css_select('h3 a').map {|e| e.attr('href')}.first
+      assert_match 'f%5B%5D=project.status', report_url
+      assert_match 'v%5Bproject.status%5D%5B%5D=1', report_url
+
+      assert_select 'table.issues tbody tr', 10
+      assert_select 'table.issues tbody tr[id=?]', 'issue-1', 1, :title => 'Cannot print recipes'
+      assert_select 'table.issues tbody tr[id=?]', 'issue-4', 0
+    end
+  end
+
+  def test_page_with_watched_issues_block_should_not_show_issues_from_closed_projects
+    preferences = User.find(2).pref
+    preferences.my_page_layout = {'top' => ['issueswatched']}
+    preferences.my_page_settings = {'issueswatched' => {}}
+    preferences.save!
+
+    issue = Issue.find(1)
+    issue.watcher_user_ids = ['1', '2']
+    issue.save!
+
+    issue2 = Issue.find(4)
+    issue2.watcher_user_ids = ['2']
+    issue2.save!
+
+    project = Project.find(2)
+    project.close
+    project.save
+
+    get :page
+
+    assert_response :success
+    assert_select '#block-issueswatched table.issues tbody' do
+      report_url = css_select('h3 a').map {|e| e.attr('href')}.first
+      assert_match 'f%5B%5D=project.status', report_url
+      assert_match 'v%5Bproject.status%5D%5B%5D=1', report_url
+
+      assert_select 'tr', 1
+      assert_select 'tr[id=?]', 'issue-1', 1, :title => 'Cannot print recipes'
+      assert_select 'tr[id=?]', 'issue-4', 0
+    end
   end
 
   def test_my_account_should_show_editable_custom_fields
@@ -231,9 +368,11 @@ class MyControllerTest < Redmine::ControllerTest
 
   def test_my_account_with_avatar_enabled_should_link_to_edit_avatar
     with_settings :gravatar_enabled => '1' do
-      get :account
-      assert_response :success
-      assert_select 'a[href=?] img.gravatar', 'https://gravatar.com'
+      Redmine::Configuration.with 'avatar_server_url' => 'https://gravatar.com' do
+        get :account
+        assert_response :success
+        assert_select 'a[href=?] img.gravatar', 'https://gravatar.com'
+      end
     end
   end
 
@@ -246,7 +385,7 @@ class MyControllerTest < Redmine::ControllerTest
   end
 
   def test_update_account
-    post :account, :params => {
+    put :account, :params => {
         :user => {
           :firstname => "Joe",
           :login => "root",
@@ -254,8 +393,8 @@ class MyControllerTest < Redmine::ControllerTest
           :group_ids => ['10'],
           :custom_field_values => {
             "4" => "0100562500"
-          }    
-          
+          }
+
         }
       }
 
@@ -271,10 +410,10 @@ class MyControllerTest < Redmine::ControllerTest
 
   def test_update_account_should_send_security_notification
     ActionMailer::Base.deliveries.clear
-    post :account, :params => {
+    put :account, :params => {
         :user => {
           :mail => 'foobar@example.com'
-          
+
         }
       }
 
@@ -287,6 +426,42 @@ class MyControllerTest < Redmine::ControllerTest
     # The old email address should be notified about the change for security purposes
     assert [mail.bcc, mail.cc].flatten.include?(User.find(2).mail)
     assert [mail.bcc, mail.cc].flatten.include?('foobar@example.com')
+  end
+
+  def test_my_account_notify_about_high_priority_issues_preference
+    # normally, preference should be shown
+    get :account
+    assert_select 'label[for="pref_notify_about_high_priority_issues"]'
+
+    # preference should be persisted
+    put :account, :params => {
+        :pref => {
+          notify_about_high_priority_issues: '1'
+        }
+      }
+    assert User.find(2).notify_about_high_priority_issues?
+
+    # preference should be hidden if there aren't any priorities
+    Issue.destroy_all
+    IssuePriority.destroy_all
+    get :account
+    assert_select 'label[for="pref_notify_about_high_priority_issues"]', false
+
+    # preference should be hidden if there isn't a "high" priority
+    a = IssuePriority.create! name: 'A'
+    get :account
+    assert_select 'label[for="pref_notify_about_high_priority_issues"]', false
+
+    # preference should be shown if there are at least two priorities (one low, one high)
+    b = IssuePriority.create! name: 'B'
+    get :account
+    assert_select 'label[for="pref_notify_about_high_priority_issues"]'
+
+    # preference should be hidden if the highest priority is the default one,
+    # because that means that there is no "high" priority
+    b.update! is_default: true
+    get :account
+    assert_select 'label[for="pref_notify_about_high_priority_issues"]', false
   end
 
   def test_my_account_should_show_destroy_link
@@ -401,7 +576,7 @@ class MyControllerTest < Redmine::ControllerTest
     post :update_page, :params => {
         :settings => {
           'issuesassignedtome' => {
-          'columns' => ['subject', 'due_date']}    
+          'columns' => ['subject', 'due_date']}
         }
       },
       :xhr => true
@@ -458,7 +633,7 @@ class MyControllerTest < Redmine::ControllerTest
     pref = User.find(2).pref
     pref.my_page_layout = {'left' => ['news', 'calendar','documents']}
     pref.save!
-    
+
     post :order_blocks, :params => {
         :group => 'left',
         :blocks => ['documents', 'calendar', 'news']
@@ -472,7 +647,7 @@ class MyControllerTest < Redmine::ControllerTest
     pref = User.find(2).pref
     pref.my_page_layout = {'left' => ['news','documents'], 'right' => ['calendar']}
     pref.save!
-    
+
     post :order_blocks, :params => {
         :group => 'left',
         :blocks => ['news', 'calendar', 'documents']

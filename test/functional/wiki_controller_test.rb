@@ -1,7 +1,7 @@
-# encoding: utf-8
-#
+# frozen_string_literal: true
+
 # Redmine - project management software
-# Copyright (C) 2006-2017  Jean-Philippe Lang
+# Copyright (C) 2006-2020  Jean-Philippe Lang
 #
 # This program is free software; you can redistribute it and/or
 # modify it under the terms of the GNU General Public License
@@ -36,7 +36,7 @@ class WikiControllerTest < Redmine::ControllerTest
     assert_select 'h1', :text => /CookBook documentation/
     # child_pages macro
     assert_select 'ul.pages-hierarchy>li>a[href=?]', '/projects/ecookbook/wiki/Page_with_an_inline_image',
-      :text => 'Page with an inline image'
+                  :text => 'Page with an inline image'
   end
 
   def test_export_link
@@ -65,7 +65,6 @@ class WikiControllerTest < Redmine::ControllerTest
     assert_select 'a[href=?]', '/projects/ecookbook/wiki/CookBook_documentation/1', :text => /Previous/
     assert_select 'a[href=?]', '/projects/ecookbook/wiki/CookBook_documentation/2/diff', :text => /diff/
     assert_select 'a[href=?]', '/projects/ecookbook/wiki/CookBook_documentation/3', :text => /Next/
-    assert_select 'a[href=?]', '/projects/ecookbook/wiki/CookBook_documentation', :text => /Current version/
   end
 
   def test_show_old_version_with_attachments
@@ -77,7 +76,6 @@ class WikiControllerTest < Redmine::ControllerTest
 
     get :show, :params => {:project_id => 'ecookbook', :id => page.title, :version => '1'}
     assert_response :success
-    assert_select 'a[href=?]', '/projects/ecookbook/wiki/Page_with_an_inline_image', :text => /Current version/
   end
 
   def test_show_old_version_without_permission_should_be_denied
@@ -96,7 +94,6 @@ class WikiControllerTest < Redmine::ControllerTest
     assert_select 'a', :text => /Previous/, :count => 0
     assert_select 'a', :text => /diff/, :count => 0
     assert_select 'a[href=?]', '/projects/ecookbook/wiki/CookBook_documentation/2', :text => /Next/
-    assert_select 'a[href=?]', '/projects/ecookbook/wiki/CookBook_documentation', :text => /Current version/
   end
 
   def test_show_redirected_page
@@ -177,6 +174,16 @@ class WikiControllerTest < Redmine::ControllerTest
     get :show, :params => {:project_id => 1, :id => 'NoContent'}
     assert_response :success
     assert_select 'textarea[name=?]', 'content[text]'
+  end
+
+  def test_show_protected_page_shoud_show_locked_badge
+    @request.session[:user_id] = 2
+
+    get :show, :params => {:project_id => 1, :id => 'CookBook_documentation'}
+
+    assert_select 'p.wiki-update-info' do
+      assert_select 'span.badge.badge-status-locked'
+    end
   end
 
   def test_get_new
@@ -266,6 +273,7 @@ class WikiControllerTest < Redmine::ControllerTest
   end
 
   def test_create_page_with_attachments
+    set_tmp_attachments_directory
     @request.session[:user_id] = 2
     assert_difference 'WikiPage.count' do
       assert_difference 'Attachment.count' do
@@ -306,11 +314,9 @@ class WikiControllerTest < Redmine::ControllerTest
   def test_edit_page
     @request.session[:user_id] = 2
     get :edit, :params => {:project_id => 'ecookbook', :id => 'Another_page'}
-
     assert_response :success
-
     assert_select 'textarea[name=?]', 'content[text]',
-      :text => WikiPage.find_by_title('Another_page').content.text
+                  :text => WikiPage.find_by_title('Another_page').content.text
   end
 
   def test_edit_section
@@ -436,6 +442,7 @@ class WikiControllerTest < Redmine::ControllerTest
   end
 
   def test_update_page_with_attachments_only_should_not_create_content_version
+    set_tmp_attachments_directory
     @request.session[:user_id] = 2
     assert_no_difference 'WikiPage.count' do
       assert_no_difference 'WikiContent.count' do
@@ -457,6 +464,46 @@ class WikiControllerTest < Redmine::ControllerTest
     end
     page = Wiki.find(1).pages.find_by_title('Another_page')
     assert_equal 1, page.content.version
+  end
+
+  def test_update_with_deleted_attachment_ids
+    set_tmp_attachments_directory
+    @request.session[:user_id] = 2
+    page = WikiPage.find(4)
+    attachment = page.attachments.first
+    assert_difference 'Attachment.count', -1 do
+      put :update, :params => {
+        :project_id => page.wiki.project.id,
+        :id => page.title,
+        :content => {
+          :comments => 'delete file',
+          :text => 'edited'
+        },
+        :wiki_page => {:deleted_attachment_ids => [attachment.id]}
+      }
+    end
+    page.reload
+    refute_includes page.attachments, attachment
+  end
+
+  def test_update_with_deleted_attachment_ids_and_failure_should_preserve_selected_attachments
+    set_tmp_attachments_directory
+    @request.session[:user_id] = 2
+    page = WikiPage.find(4)
+    attachment = page.attachments.first
+    assert_no_difference 'Attachment.count' do
+      put :update, :params => {
+        :project_id => page.wiki.project.id,
+        :id => page.title,
+        :content => {
+          :comments => 'a' * 1300,  # failure here, comment is too long
+          :text => 'edited'
+        },
+        :wiki_page => {:deleted_attachment_ids => [attachment.id]}
+      }
+    end
+    page.reload
+    assert_includes page.attachments, attachment
   end
 
   def test_update_stale_page_should_not_raise_an_error
@@ -702,11 +749,10 @@ class WikiControllerTest < Redmine::ControllerTest
       assert_select 'td', :text => /h1\. CookBook documentation v2/
     end
 
-    # Line 4
-    assert_select 'table.annotate tr:nth-child(4)' do
-      assert_select 'th.line-num', :text => '4'
+    # Line 2
+    assert_select 'table.annotate tr:nth-child(2)' do
+      assert_select 'th.line-num', :text => '2'
       assert_select 'td.author', :text => /John Smith/
-      assert_select 'td', :text => /Line from v1/
     end
 
     # Line 5
@@ -868,6 +914,7 @@ class WikiControllerTest < Redmine::ControllerTest
     @request.session[:user_id] = 2
     delete :destroy, :params => {:project_id => 1, :id => 'Child_2'}
     assert_redirected_to :action => 'index', :project_id => 'ecookbook'
+    assert_equal 'Successful deletion.', flash[:notice]
   end
 
   def test_destroy_parent_should_ask_confirmation
@@ -889,6 +936,7 @@ class WikiControllerTest < Redmine::ControllerTest
       delete :destroy, :params => {:project_id => 1, :id => 'Another_page', :todo => 'nullify'}
     end
     assert_redirected_to :action => 'index', :project_id => 'ecookbook'
+    assert_equal 'Successful deletion.', flash[:notice]
     assert_nil WikiPage.find_by_id(2)
   end
 
@@ -898,6 +946,7 @@ class WikiControllerTest < Redmine::ControllerTest
       delete :destroy, :params => {:project_id => 1, :id => 'Another_page', :todo => 'destroy'}
     end
     assert_redirected_to :action => 'index', :project_id => 'ecookbook'
+    assert_equal 'Successful deletion.', flash[:notice]
     assert_nil WikiPage.find_by_id(2)
     assert_nil WikiPage.find_by_id(5)
   end
@@ -908,6 +957,7 @@ class WikiControllerTest < Redmine::ControllerTest
       delete :destroy, :params => {:project_id => 1, :id => 'Another_page', :todo => 'reassign', :reassign_to_id => 1}
     end
     assert_redirected_to :action => 'index', :project_id => 'ecookbook'
+    assert_equal 'Successful deletion.', flash[:notice]
     assert_nil WikiPage.find_by_id(2)
     assert_equal WikiPage.find(1), WikiPage.find_by_id(5).parent
   end
@@ -945,11 +995,11 @@ class WikiControllerTest < Redmine::ControllerTest
     end
 
     assert_select 'ul.pages-hierarchy' do
-      assert_select 'li' do
-        assert_select 'a[href=?]', '/projects/ecookbook/wiki/CookBook_documentation', :text => 'CookBook documentation'
+      assert_select 'li:nth-child(1) > a[href=?]', '/projects/ecookbook/wiki/Another_page', :text => 'Another page'
+      assert_select 'li:nth-child(2)' do
+        assert_select '> a[href=?]', '/projects/ecookbook/wiki/CookBook_documentation', :text => 'CookBook documentation'
         assert_select 'ul li a[href=?]', '/projects/ecookbook/wiki/Page_with_an_inline_image', :text => 'Page with an inline image'
       end
-      assert_select 'li a[href=?]', '/projects/ecookbook/wiki/Another_page', :text => 'Another page'
     end
   end
 
@@ -963,8 +1013,13 @@ class WikiControllerTest < Redmine::ControllerTest
     get :export, :params => {:project_id => 'ecookbook'}
 
     assert_response :success
-    assert_equal "text/html", @response.content_type
+    assert_equal "text/html", @response.media_type
 
+    assert_select 'ul.pages-hierarchy' do
+      assert_select 'li:nth-child(1) > a[href=?]', '#Another_page', :text => 'Another page'
+      assert_select 'li:nth-child(2) > a[href=?]', '#CookBook_documentation', :text => 'CookBook documentation'
+      assert_select 'li:nth-child(3) > a[href=?]', '#Page_with_sections', :text => 'Page with sections'
+    end
     assert_select "a[name=?]", "CookBook_documentation"
     assert_select "a[name=?]", "Another_page"
     assert_select "a[name=?]", "Page_with_an_inline_image"
@@ -975,7 +1030,7 @@ class WikiControllerTest < Redmine::ControllerTest
     get :export, :params => {:project_id => 'ecookbook', :format => 'pdf'}
 
     assert_response :success
-    assert_equal 'application/pdf', @response.content_type
+    assert_equal 'application/pdf', @response.media_type
     assert_equal 'attachment; filename="ecookbook.pdf"', @response.headers['Content-Disposition']
     assert @response.body.starts_with?('%PDF')
   end
@@ -1040,9 +1095,9 @@ class WikiControllerTest < Redmine::ControllerTest
     get :show, :params => {:project_id => 1, :format => 'pdf'}
     assert_response :success
 
-    assert_equal 'application/pdf', @response.content_type
+    assert_equal 'application/pdf', @response.media_type
     assert_equal 'attachment; filename="CookBook_documentation.pdf"',
-                  @response.headers['Content-Disposition']
+                 @response.headers['Content-Disposition']
   end
 
   def test_show_html
@@ -1050,9 +1105,9 @@ class WikiControllerTest < Redmine::ControllerTest
     get :show, :params => {:project_id => 1, :format => 'html'}
     assert_response :success
 
-    assert_equal 'text/html', @response.content_type
+    assert_equal 'text/html', @response.media_type
     assert_equal 'attachment; filename="CookBook_documentation.html"',
-                  @response.headers['Content-Disposition']
+                 @response.headers['Content-Disposition']
     assert_select 'h1', :text => /CookBook documentation/
   end
 
@@ -1061,9 +1116,9 @@ class WikiControllerTest < Redmine::ControllerTest
     get :show, :params => {:project_id => 1, :format => 'html', :version => 2}
     assert_response :success
 
-    assert_equal 'text/html', @response.content_type
+    assert_equal 'text/html', @response.media_type
     assert_equal 'attachment; filename="CookBook_documentation.html"',
-                  @response.headers['Content-Disposition']
+                 @response.headers['Content-Disposition']
     assert_select 'h1', :text => /CookBook documentation v2/
   end
 
@@ -1072,9 +1127,9 @@ class WikiControllerTest < Redmine::ControllerTest
     get :show, :params => {:project_id => 1, :format => 'txt'}
     assert_response :success
 
-    assert_equal 'text/plain', @response.content_type
+    assert_equal 'text/plain', @response.media_type
     assert_equal 'attachment; filename="CookBook_documentation.txt"',
-                  @response.headers['Content-Disposition']
+                 @response.headers['Content-Disposition']
     assert_include 'h1. CookBook documentation', @response.body
   end
 
@@ -1083,9 +1138,9 @@ class WikiControllerTest < Redmine::ControllerTest
     get :show, :params => {:project_id => 1, :format => 'txt', :version => 2}
     assert_response :success
 
-    assert_equal 'text/plain', @response.content_type
+    assert_equal 'text/plain', @response.media_type
     assert_equal 'attachment; filename="CookBook_documentation.txt"',
-                  @response.headers['Content-Disposition']
+                 @response.headers['Content-Disposition']
     assert_include 'h1. CookBook documentation v2', @response.body
   end
 
@@ -1098,14 +1153,14 @@ class WikiControllerTest < Redmine::ControllerTest
       get :show, :params => {:project_id => 1, :id => title, :format => format}
       assert_response :success
       assert_equal "attachment; filename=\"#{title}.#{format}\"",
-                    @response.headers['Content-Disposition']
+                   @response.headers['Content-Disposition']
       # Microsoft's browsers: filename should be URI encoded
       @request.user_agent = 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/52.0.2743.116 Safari/537.36 Edge/15.15063'
       get :show, :params => {:project_id => 1, :id => title, :format => format}
       assert_response :success
-      filename = URI.encode("#{title}.#{format}")
+      filename = Addressable::URI.encode("#{title}.#{format}")
       assert_equal "attachment; filename=\"#{filename}\"",
-                    @response.headers['Content-Disposition']
+                   @response.headers['Content-Disposition']
     end
   end
 
@@ -1135,6 +1190,7 @@ class WikiControllerTest < Redmine::ControllerTest
   end
 
   def test_add_attachment
+    set_tmp_attachments_directory
     @request.session[:user_id] = 2
     assert_difference 'Attachment.count' do
       post :add_attachment, :params => {
@@ -1147,5 +1203,18 @@ class WikiControllerTest < Redmine::ControllerTest
     end
     attachment = Attachment.order('id DESC').first
     assert_equal Wiki.find(1).find_page('CookBook_documentation'), attachment.container
+  end
+
+  def test_old_version_should_have_robot_exclusion_tag
+    @request.session[:user_id] = 2
+    # Discourage search engines from indexing old versions
+    get :show, :params => {:project_id => 'ecookbook', :id => 'CookBook_documentation', :version => '2'}
+    assert_response :success
+    assert_select 'head>meta[name="robots"][content=?]', 'noindex,follow,noarchive'
+
+    # No robots meta tag in the current version
+    get :show, :params => {:project_id => 'ecookbook', :id => 'CookBook_documentation'}
+    assert_response :success
+    assert_select 'head>meta[name="robots"]', false
   end
 end

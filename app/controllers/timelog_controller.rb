@@ -1,5 +1,7 @@
+# frozen_string_literal: true
+
 # Redmine - project management software
-# Copyright (C) 2006-2017  Jean-Philippe Lang
+# Copyright (C) 2006-2020  Jean-Philippe Lang
 #
 # This program is free software; you can redistribute it and/or
 # modify it under the terms of the GNU General Public License
@@ -90,12 +92,12 @@ class TimelogController < ApplicationController
   end
 
   def new
-    @time_entry ||= TimeEntry.new(:project => @project, :issue => @issue, :user => User.current, :spent_on => User.current.today)
+    @time_entry ||= TimeEntry.new(:project => @project, :issue => @issue, :author => User.current, :spent_on => User.current.today)
     @time_entry.safe_attributes = params[:time_entry]
   end
 
   def create
-    @time_entry ||= TimeEntry.new(:project => @project, :issue => @issue, :user => User.current, :spent_on => User.current.today)
+    @time_entry ||= TimeEntry.new(:project => @project, :issue => @issue, :author => User.current, :user => User.current, :spent_on => User.current.today)
     @time_entry.safe_attributes = params[:time_entry]
     if @time_entry.project && !User.current.allowed_to?(:log_time, @time_entry.project)
       render_403
@@ -113,6 +115,7 @@ class TimelogController < ApplicationController
               :time_entry => {
                 :project_id => params[:time_entry][:project_id],
                 :issue_id => @time_entry.issue_id,
+                :spent_on => @time_entry.spent_on,
                 :activity_id => @time_entry.activity_id
               },
               :back_url => params[:back_url]
@@ -144,7 +147,6 @@ class TimelogController < ApplicationController
 
   def update
     @time_entry.safe_attributes = params[:time_entry]
-
     call_hook(:controller_timelog_edit_before_save, { :params => params, :time_entry => @time_entry })
 
     if @time_entry.save
@@ -164,8 +166,18 @@ class TimelogController < ApplicationController
   end
 
   def bulk_edit
-    @available_activities = @projects.map(&:activities).reduce(:&)
+    @target_projects = Project.allowed_to(:log_time).to_a
     @custom_fields = TimeEntry.first.available_custom_fields.select {|field| field.format.bulk_edit_supported}
+    if params[:time_entry]
+      @target_project = @target_projects.detect {|p| p.id.to_s == params[:time_entry][:project_id].to_s}
+    end
+    if @target_project
+      @available_activities = @target_project.activities
+    else
+      @available_activities = @projects.map(&:activities).reduce(:&)
+    end
+    @time_entry_params = params[:time_entry] || {}
+    @time_entry_params[:custom_field_values] ||= {}
   end
 
   def bulk_update
@@ -228,7 +240,8 @@ class TimelogController < ApplicationController
     end
   end
 
-private
+  private
+
   def find_time_entry
     @time_entry = TimeEntry.find(params[:id])
     @project = @time_entry.project
@@ -272,6 +285,6 @@ private
   end
 
   def retrieve_time_entry_query
-    retrieve_query(TimeEntryQuery, false, :defaults => Setting.time_entry_list_defaults.symbolize_keys)
+    retrieve_query(TimeEntryQuery, false, :defaults => @default_columns_names)
   end
 end

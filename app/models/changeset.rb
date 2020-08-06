@@ -1,5 +1,7 @@
+# frozen_string_literal: true
+
 # Redmine - project management software
-# Copyright (C) 2006-2017  Jean-Philippe Lang
+# Copyright (C) 2006-2020  Jean-Philippe Lang
 #
 # This program is free software; you can redistribute it and/or
 # modify it under the terms of the GNU General Public License
@@ -115,6 +117,7 @@ class Changeset < ActiveRecord::Base
 
   def scan_comment_for_issue_ids
     return if comments.blank?
+
     # keywords used to reference issues
     ref_keywords = Setting.commit_ref_keywords.downcase.split(",").collect(&:strip)
     ref_keywords_any = ref_keywords.delete('*')
@@ -159,11 +162,7 @@ class Changeset < ActiveRecord::Base
     if repository && repository.identifier.present?
       repo = "#{repository.identifier}|"
     end
-    tag = if scmid?
-      "commit:#{repo}#{scmid}"
-    else
-      "#{repo}r#{revision}"
-    end
+    tag = scmid? ? "commit:#{repo}#{scmid}" : "#{repo}r#{revision}"
     if ref_project && project && ref_project != project
       tag = "#{project.identifier}:#{tag}"
     end
@@ -199,6 +198,7 @@ class Changeset < ActiveRecord::Base
   # Finds an issue that can be referenced by the commit message
   def find_referenced_issue_by_id(id)
     return nil if id.blank?
+
     issue = Issue.find_by_id(id.to_i)
     if Setting.commit_cross_project_ref?
       # all issues can be referenced/fixed
@@ -240,7 +240,7 @@ class Changeset < ActiveRecord::Base
       issue.assign_attributes rule.slice(*Issue.attribute_names)
     end
     Redmine::Hook.call_hook(:model_changeset_scan_commit_for_issue_ids_pre_issue_update,
-                            { :changeset => self, :issue => issue, :action => action })
+                            {:changeset => self, :issue => issue, :action => action})
 
     if issue.changes.any?
       unless issue.save
@@ -261,18 +261,14 @@ class Changeset < ActiveRecord::Base
       :comments => l(:text_time_logged_by_changeset, :value => text_tag(issue.project),
                      :locale => Setting.default_language)
       )
-    time_entry.activity = log_time_activity unless log_time_activity.nil?
+    if activity = issue.project.commit_logtime_activity
+      time_entry.activity = activity
+    end
 
     unless time_entry.save
       logger.warn("TimeEntry could not be created by changeset #{id}: #{time_entry.errors.full_messages}") if logger
     end
     time_entry
-  end
-
-  def log_time_activity
-    if Setting.commit_logtime_activity_id.to_i > 0
-      TimeEntryActivity.find_by_id(Setting.commit_logtime_activity_id.to_i)
-    end
   end
 
   def split_comments
@@ -282,14 +278,15 @@ class Changeset < ActiveRecord::Base
     return @short_comments, @long_comments
   end
 
-  public
+  # Singleton class method is public
+  class << self
+    # Strips and reencodes a commit log before insertion into the database
+    def normalize_comments(str, encoding)
+      Changeset.to_utf8(str.to_s.strip, encoding)
+    end
 
-  # Strips and reencodes a commit log before insertion into the database
-  def self.normalize_comments(str, encoding)
-    Changeset.to_utf8(str.to_s.strip, encoding)
-  end
-
-  def self.to_utf8(str, encoding)
-    Redmine::CodesetUtil.to_utf8(str, encoding)
+    def to_utf8(str, encoding)
+      Redmine::CodesetUtil.to_utf8(str, encoding)
+    end
   end
 end

@@ -1,5 +1,7 @@
+# frozen_string_literal: true
+
 # Redmine - project management software
-# Copyright (C) 2006-2017  Jean-Philippe Lang
+# Copyright (C) 2006-2020  Jean-Philippe Lang
 #
 # This program is free software; you can redistribute it and/or
 # modify it under the terms of the GNU General Public License
@@ -27,11 +29,11 @@ class Journal < ActiveRecord::Base
   has_many :details, :class_name => "JournalDetail", :dependent => :delete_all, :inverse_of => :journal
   attr_accessor :indice
 
-  acts_as_event :title => Proc.new {|o| status = ((s = o.new_status) ? " (#{s})" : nil); "#{o.issue.tracker} ##{o.issue.id}#{status}: #{o.issue.subject}" },
+  acts_as_event :title => Proc.new {|o| status = ((s = o.new_status) ? " (#{s})" : nil); "#{o.issue.tracker} ##{o.issue.id}#{status}: #{o.issue.subject}"},
                 :description => :notes,
                 :author => :user,
                 :group => :issue,
-                :type => Proc.new {|o| (s = o.new_status) ? (s.is_closed? ? 'issue-closed' : 'issue-edit') : 'issue-note' },
+                :type => Proc.new {|o| (s = o.new_status) ? (s.is_closed? ? 'issue-closed' : 'issue-edit') : 'issue-note'},
                 :url => Proc.new {|o| {:controller => 'issues', :action => 'show', :id => o.issue.id, :anchor => "change-#{o.id}"}}
 
   acts_as_activity_provider :type => 'issues',
@@ -42,7 +44,7 @@ class Journal < ActiveRecord::Base
                                             " (#{JournalDetail.table_name}.prop_key = 'status_id' OR #{Journal.table_name}.notes <> '')").distinct
 
   before_create :split_private_notes
-  after_commit :send_notification, :on => :create
+  after_create_commit :send_notification
 
   scope :visible, lambda {|*args|
     user = args.shift || User.current
@@ -53,10 +55,12 @@ class Journal < ActiveRecord::Base
       where(Journal.visible_notes_condition(user, :skip_pre_condition => true))
   }
 
-  safe_attributes 'notes',
-    :if => lambda {|journal, user| journal.new_record? || journal.editable_by?(user)}
-  safe_attributes 'private_notes',
-    :if => lambda {|journal, user| user.allowed_to?(:set_notes_private, journal.project)}
+  safe_attributes(
+    'notes',
+    :if => lambda {|journal, user| journal.new_record? || journal.editable_by?(user)})
+  safe_attributes(
+    'private_notes',
+    :if => lambda {|journal, user| user.allowed_to?(:set_notes_private, journal.project)})
 
   # Returns a SQL condition to filter out journals with notes that are not visible to user
   def self.visible_notes_condition(user=User.current, options={})
@@ -94,19 +98,6 @@ class Journal < ActiveRecord::Base
     end
   end
 
-  def each_notification(users, &block)
-    if users.any?
-      users_by_details_visibility = users.group_by do |user|
-        visible_details(user)
-      end
-      users_by_details_visibility.each do |visible_details, users|
-        if notes? || visible_details.any?
-          yield(users)
-        end
-      end
-    end
-  end
-
   # Returns the JournalDetail for the given attribute, or nil if the attribute
   # was not updated
   def detail_for_attribute(attribute)
@@ -137,7 +128,7 @@ class Journal < ActiveRecord::Base
 
   # Returns a string of css classes
   def css_classes
-    s = 'journal'
+    s = +'journal'
     s << ' has-notes' unless notes.blank?
     s << ' has-details' unless details.blank?
     s << ' private-notes' if private_notes?
@@ -210,7 +201,8 @@ class Journal < ActiveRecord::Base
   # Adds a journal detail for an attachment that was added or removed
   def journalize_attachment(attachment, added_or_removed)
     key = (added_or_removed == :removed ? :old_value : :value)
-    details << JournalDetail.new(
+    details <<
+      JournalDetail.new(
         :property => 'attachment',
         :prop_key => attachment.id,
         key => attachment.filename
@@ -220,7 +212,8 @@ class Journal < ActiveRecord::Base
   # Adds a journal detail for an issue relation that was added or removed
   def journalize_relation(relation, added_or_removed)
     key = (added_or_removed == :removed ? :old_value : :value)
-    details << JournalDetail.new(
+    details <<
+      JournalDetail.new(
         :property  => 'relation',
         :prop_key  => relation.relation_type_for(journalized),
         key => relation.other_issue(journalized).try(:id)
@@ -238,6 +231,7 @@ class Journal < ActiveRecord::Base
         before = @attributes_before_change[attribute]
         after = journalized.send(attribute)
         next if before == after || (before.blank? && after.blank?)
+
         add_attribute_detail(attribute, before, after)
       end
     end
@@ -287,7 +281,8 @@ class Journal < ActiveRecord::Base
 
   # Adds a journal detail
   def add_detail(property, prop_key, old_value, value)
-    details << JournalDetail.new(
+    details <<
+      JournalDetail.new(
         :property => property,
         :prop_key => prop_key,
         :old_value => old_value,
@@ -315,12 +310,15 @@ class Journal < ActiveRecord::Base
   end
 
   def send_notification
-    if notify? && (Setting.notified_events.include?('issue_updated') ||
-        (Setting.notified_events.include?('issue_note_added') && notes.present?) ||
-        (Setting.notified_events.include?('issue_status_updated') && new_status.present?) ||
-        (Setting.notified_events.include?('issue_assigned_to_updated') && detail_for_attribute('assigned_to_id').present?) ||
-        (Setting.notified_events.include?('issue_priority_updated') && new_value_for('priority_id').present?)
-      )
+    if notify? &&
+        (
+          Setting.notified_events.include?('issue_updated') ||
+          (Setting.notified_events.include?('issue_note_added') && notes.present?) ||
+          (Setting.notified_events.include?('issue_status_updated') && new_status.present?) ||
+          (Setting.notified_events.include?('issue_assigned_to_updated') && detail_for_attribute('assigned_to_id').present?) ||
+          (Setting.notified_events.include?('issue_priority_updated') && new_value_for('priority_id').present?) ||
+          (Setting.notified_events.include?('issue_fixed_version_updated') && detail_for_attribute('fixed_version_id').present?)
+        )
       Mailer.deliver_issue_edit(self)
     end
   end

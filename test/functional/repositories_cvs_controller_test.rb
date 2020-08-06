@@ -1,5 +1,7 @@
+# frozen_string_literal: true
+
 # Redmine - project management software
-# Copyright (C) 2006-2017  Jean-Philippe Lang
+# Copyright (C) 2006-2020  Jean-Philippe Lang
 #
 # This program is free software; you can redistribute it and/or
 # modify it under the terms of the GNU General Public License
@@ -86,6 +88,7 @@ class RepositoriesCvsControllerTest < Redmine::RepositoryControllerTest
       assert_equal NUM_REV, @repository.changesets.count
       get :show, :params => {
           :id => PRJ_ID,
+          :repository_id => @repository.id,
           :path => repository_path_hash(['images'])[:param]
         }
       assert_response :success
@@ -105,6 +108,7 @@ class RepositoriesCvsControllerTest < Redmine::RepositoryControllerTest
       assert_equal NUM_REV, @repository.changesets.count
       get :show, :params => {
           :id => PRJ_ID,
+          :repository_id => @repository.id,
           :path => repository_path_hash(['images'])[:param],
           :rev => 1
         }
@@ -124,6 +128,7 @@ class RepositoriesCvsControllerTest < Redmine::RepositoryControllerTest
       assert_equal NUM_REV, @repository.changesets.count
       get :entry, :params => {
           :id => PRJ_ID,
+          :repository_id => @repository.id,
           :path => repository_path_hash(['sources', 'watchers_controller.rb'])[:param]
         }
       assert_response :success
@@ -139,6 +144,7 @@ class RepositoriesCvsControllerTest < Redmine::RepositoryControllerTest
       assert_equal NUM_REV, @repository.changesets.count
       get :entry, :params => {
           :id => PRJ_ID,
+          :repository_id => @repository.id,
           :path => repository_path_hash(['sources', 'watchers_controller.rb'])[:param],
           :rev => 2
         }
@@ -155,7 +161,8 @@ class RepositoriesCvsControllerTest < Redmine::RepositoryControllerTest
       assert_equal NUM_REV, @repository.changesets.count
       get :entry, :params => {
           :id => PRJ_ID,
-          :path => repository_path_hash(['sources', 'zzz.c'])[:param]
+          :repository_id => @repository.id,
+           :path => repository_path_hash(['sources', 'zzz.c'])[:param]
         }
       assert_select 'p#errorExplanation', :text => /The entry or revision was not found in the repository/
     end
@@ -167,6 +174,7 @@ class RepositoriesCvsControllerTest < Redmine::RepositoryControllerTest
       assert_equal NUM_REV, @repository.changesets.count
       get :entry, :params => {
           :id => PRJ_ID,
+          :repository_id => @repository.id,
           :path => repository_path_hash(['sources', 'watchers_controller.rb'])[:param],
           :format => 'raw'
         }
@@ -180,6 +188,7 @@ class RepositoriesCvsControllerTest < Redmine::RepositoryControllerTest
       assert_equal NUM_REV, @repository.changesets.count
       get :entry, :params => {
           :id => PRJ_ID,
+          :repository_id => @repository.id,
           :path => repository_path_hash(['sources'])[:param]
         }
       assert_response :success
@@ -194,6 +203,7 @@ class RepositoriesCvsControllerTest < Redmine::RepositoryControllerTest
       ['inline', 'sbs'].each do |dt|
         get :diff, :params => {
             :id => PRJ_ID,
+            :repository_id => @repository.id,
             :rev => 3,
             :type => dt
           }
@@ -212,6 +222,7 @@ class RepositoriesCvsControllerTest < Redmine::RepositoryControllerTest
       ['inline', 'sbs'].each do |dt|
         get :diff, :params => {
             :id => PRJ_ID,
+            :repository_id => @repository.id,
             :rev => 1,
             :type => dt
           }
@@ -232,6 +243,7 @@ class RepositoriesCvsControllerTest < Redmine::RepositoryControllerTest
       assert_equal NUM_REV, @repository.changesets.count
       get :annotate, :params => {
           :id => PRJ_ID,
+          :repository_id => @repository.id,
           :path => repository_path_hash(['sources', 'watchers_controller.rb'])[:param]
         }
       assert_response :success

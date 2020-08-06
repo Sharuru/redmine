@@ -1,5 +1,7 @@
+# frozen_string_literal: true
+
 # Redmine - project management software
-# Copyright (C) 2006-2017  Jean-Philippe Lang
+# Copyright (C) 2006-2020  Jean-Philippe Lang
 #
 # This program is free software; you can redistribute it and/or
 # modify it under the terms of the GNU General Public License
@@ -31,6 +33,7 @@ class IssueRelation < ActiveRecord::Base
   end
 
   include Redmine::SafeAttributes
+  include Redmine::Utils::DateCalculation
 
   belongs_to :issue_from, :class_name => 'Issue'
   belongs_to :issue_to, :class_name => 'Issue'
@@ -77,8 +80,8 @@ class IssueRelation < ActiveRecord::Base
   after_destroy :call_issues_relation_removed_callback
 
   safe_attributes 'relation_type',
-    'delay',
-    'issue_to_id'
+                  'delay',
+                  'issue_to_id'
 
   def safe_attributes=(attrs, user=User.current)
     if attrs.respond_to?(:to_unsafe_hash)
@@ -149,9 +152,11 @@ class IssueRelation < ActiveRecord::Base
   end
 
   def label_for(issue)
-    TYPES[relation_type] ?
-        TYPES[relation_type][(self.issue_from_id == issue.id) ? :name : :sym_name] :
-        :unknow
+    if TYPES[relation_type]
+      TYPES[relation_type][(self.issue_from_id == issue.id) ? :name : :sym_name]
+    else
+      :unknow
+    end
   end
 
   def to_s(issue=nil)
@@ -179,17 +184,17 @@ class IssueRelation < ActiveRecord::Base
     set_issue_to_dates
   end
 
-  def set_issue_to_dates
+  def set_issue_to_dates(journal=nil)
     soonest_start = self.successor_soonest_start
     if soonest_start && issue_to
-      issue_to.reschedule_on!(soonest_start)
+      issue_to.reschedule_on!(soonest_start, journal)
     end
   end
 
   def successor_soonest_start
     if (TYPE_PRECEDES == self.relation_type) && delay && issue_from &&
            (issue_from.start_date || issue_from.due_date)
-      (issue_from.due_date || issue_from.start_date) + 1 + delay
+      add_working_days((issue_from.due_date || issue_from.start_date), (1 + delay))
     end
   end
 
@@ -207,13 +212,19 @@ class IssueRelation < ActiveRecord::Base
 
   # Reverses the relation if needed so that it gets stored in the proper way
   # Should not be reversed before validation so that it can be displayed back
-  # as entered on new relation form
+  # as entered on new relation form.
+  #
+  # Orders relates relations by ID, so that uniqueness index in DB is triggered
+  # on concurrent access.
   def reverse_if_needed
     if TYPES.has_key?(relation_type) && TYPES[relation_type][:reverse]
       issue_tmp = issue_to
       self.issue_to = issue_from
       self.issue_from = issue_tmp
       self.relation_type = TYPES[relation_type][:reverse]
+
+    elsif relation_type == TYPE_RELATES && issue_from_id > issue_to_id
+      self.issue_to, self.issue_from = issue_from, issue_to
     end
   end
 
@@ -228,6 +239,8 @@ class IssueRelation < ActiveRecord::Base
       issue_from.blocks? issue_to
     when 'blocks'
       issue_to.blocks? issue_from
+    when 'relates'
+      self.class.where(issue_from_id: issue_to, issue_to_id: issue_from).present?
     else
       false
     end

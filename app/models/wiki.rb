@@ -1,5 +1,7 @@
+# frozen_string_literal: true
+
 # Redmine - project management software
-# Copyright (C) 2006-2017  Jean-Philippe Lang
+# Copyright (C) 2006-2020  Jean-Philippe Lang
 #
 # This program is free software; you can redistribute it and/or
 # modify it under the terms of the GNU General Public License
@@ -18,7 +20,7 @@
 class Wiki < ActiveRecord::Base
   include Redmine::SafeAttributes
   belongs_to :project
-  has_many :pages, lambda {order('title')}, :class_name => 'WikiPage', :dependent => :destroy
+  has_many :pages, lambda {order(Arel.sql('LOWER(title)').asc)}, :class_name => 'WikiPage', :dependent => :destroy
   has_many :redirects, :class_name => 'WikiRedirect'
 
   acts_as_watchable
@@ -53,7 +55,7 @@ class Wiki < ActiveRecord::Base
     @page_found_with_redirect = false
     title = start_page if title.blank?
     title = Wiki.titleize(title)
-    page = pages.where("LOWER(title) = LOWER(?)", title).first
+    page = pages.find_by("LOWER(title) = LOWER(?)", title)
     if page.nil? && options[:with_redirect] != false
       # search for a redirect
       redirect = redirects.where("LOWER(title) = LOWER(?)", title).first

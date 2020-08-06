@@ -1,5 +1,7 @@
+# frozen_string_literal: true
+
 # Redmine - project management software
-# Copyright (C) 2006-2017  Jean-Philippe Lang
+# Copyright (C) 2006-2020  Jean-Philippe Lang
 #
 # This program is free software; you can redistribute it and/or
 # modify it under the terms of the GNU General Public License
@@ -79,11 +81,11 @@ class IssueRelationsControllerTest < Redmine::ControllerTest
         },
         :xhr => true
       assert_response :success
-      assert_equal 'text/javascript', response.content_type
+      assert_equal 'text/javascript', response.media_type
     end
     relation = IssueRelation.order('id DESC').first
-    assert_equal 3, relation.issue_from_id
-    assert_equal 1, relation.issue_to_id
+    assert_equal 1, relation.issue_from_id
+    assert_equal 3, relation.issue_to_id
 
     assert_include 'Bug #1', response.body
   end
@@ -180,7 +182,7 @@ class IssueRelationsControllerTest < Redmine::ControllerTest
         :xhr => true
 
       assert_response :success
-      assert_equal 'text/javascript', response.content_type
+      assert_equal 'text/javascript', response.media_type
     end
     assert_include 'Related issue cannot be blank', response.body
   end
@@ -215,7 +217,7 @@ class IssueRelationsControllerTest < Redmine::ControllerTest
         :xhr => true
 
       assert_response :success
-      assert_equal 'text/javascript', response.content_type
+      assert_equal 'text/javascript', response.media_type
       assert_include 'relation-2', response.body
     end
   end

@@ -71,7 +71,11 @@ table.filecontent td.line-code pre {
 table.filecontent tr:target th.line-num { background-color:#E0E0E0; color: #777; }
 table.filecontent tr:target td.line-code { background-color:#DDEEFF; }
 
-img.filecontent { max-width: 100%; }
+img.filecontent, video.filecontent { max-width: 100%; }
+
+.previous-filename {
+  font-weight: normal;
+}
 
 /* 12 different colors for the annonate view */
 table.annotate tr.bloc-0 td.author {border-right-color: #FFFFBF;}
@@ -112,3 +116,7 @@ table.annotate td.line-code { background-color: #fafafa; }
 div.action_M { background: #fd8 }
 div.action_D { background: #f88 }
 div.action_A { background: #bfb }
+
+.breadcrumbs>.separator::before, .breadcrumbs>.separator::after {
+    content: " ";
+}

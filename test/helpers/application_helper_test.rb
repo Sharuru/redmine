@@ -1,7 +1,7 @@
-# encoding: utf-8
-#
+# frozen_string_literal: true
+
 # Redmine - project management software
-# Copyright (C) 2006-2017  Jean-Philippe Lang
+# Copyright (C) 2006-2020  Jean-Philippe Lang
 #
 # This program is free software; you can redistribute it and/or
 # modify it under the terms of the GNU General Public License
@@ -22,29 +22,32 @@ require File.expand_path('../../test_helper', __FILE__)
 class ApplicationHelperTest < Redmine::HelperTest
   include ERB::Util
   include Rails.application.routes.url_helpers
+  include AvatarsHelper
 
   fixtures :projects, :enabled_modules,
            :users, :email_addresses,
            :members, :member_roles, :roles,
            :repositories, :changesets,
            :projects_trackers,
-           :trackers, :issue_statuses, :issues, :versions, :documents,
+           :trackers, :issue_statuses, :issues, :versions, :documents, :journals,
            :wikis, :wiki_pages, :wiki_contents,
            :boards, :messages, :news,
-           :attachments, :enumerations
+           :attachments, :enumerations,
+           :custom_values, :custom_fields, :custom_fields_projects
 
   def setup
     super
     set_tmp_attachments_directory
-    @russian_test = "\xd1\x82\xd0\xb5\xd1\x81\xd1\x82".force_encoding('UTF-8')
+    @russian_test = 'тест'
   end
 
   test "#link_to_if_authorized for authorized user should allow using the :controller and :action for the target link" do
     User.current = User.find_by_login('admin')
 
     @project = Issue.first.project # Used by helper
-    response = link_to_if_authorized('By controller/actionr',
-                                    {:controller => 'issues', :action => 'edit', :id => Issue.first.id})
+    response = link_to_if_authorized(
+                 'By controller/actionr',
+                 {:controller => 'issues', :action => 'edit', :id => Issue.first.id})
     assert_match /href/, response
   end
 
@@ -53,9 +56,9 @@ class ApplicationHelperTest < Redmine::HelperTest
     @project = Project.find('private-child')
     issue = @project.issues.first
     assert !issue.visible?
-
-    response = link_to_if_authorized('Never displayed',
-                                    {:controller => 'issues', :action => 'show', :id => issue})
+    response = link_to_if_authorized(
+                 'Never displayed',
+                 {:controller => 'issues', :action => 'show', :id => issue})
     assert_nil response
   end
 
@@ -93,6 +96,8 @@ class ApplicationHelperTest < Redmine::HelperTest
       'http://' => 'http://',
       'www.' => 'www.',
       'test-www.bar.com' => 'test-www.bar.com',
+      # ends with a hyphen
+      'http://www.redmine.org/example-' => '<a class="external" href="http://www.redmine.org/example-">http://www.redmine.org/example-</a>',
     }
     to_test.each { |text, result| assert_equal "<p>#{result}</p>", textilizable(text) }
   end
@@ -127,14 +132,13 @@ class ApplicationHelperTest < Redmine::HelperTest
   end
 
   def test_inline_images_inside_tags
-    raw = <<-RAW
-h1. !foo.png! Heading
+    raw = <<~RAW
+      h1. !foo.png! Heading
 
-Centered image:
+      Centered image:
 
-p=. !bar.gif!
-RAW
-
+      p=. !bar.gif!
+    RAW
     assert textilizable(raw).include?('<img src="foo.png" alt="" />')
     assert textilizable(raw).include?('<img src="bar.gif" alt="" />')
   end
@@ -153,31 +157,41 @@ RAW
   end
 
   def test_attached_images_with_textile_and_non_ascii_filename
-    attachment = Attachment.generate!(:filename => 'café.jpg')
+    to_test = {
+      'CAFÉ.JPG' => 'CAF%C3%89.JPG',
+      'crème.jpg' => 'cr%C3%A8me.jpg',
+    }
     with_settings :text_formatting => 'textile' do
-      assert_include %(<img src="/attachments/download/#{attachment.id}/caf%C3%A9.jpg" alt="" />),
-        textilizable("!café.jpg!)", :attachments => [attachment])
+      to_test.each do |filename, result|
+        attachment = Attachment.generate!(:filename => filename)
+        assert_include %(<img src="/attachments/download/#{attachment.id}/#{result}" alt="" />), textilizable("!#{filename}!", :attachments => [attachment])
+      end
     end
   end
 
   def test_attached_images_with_markdown_and_non_ascii_filename
     skip unless Object.const_defined?(:Redcarpet)
 
-    attachment = Attachment.generate!(:filename => 'café.jpg')
+    to_test = {
+      'CAFÉ.JPG' => 'CAF%C3%89.JPG',
+      'crème.jpg' => 'cr%C3%A8me.jpg',
+    }
     with_settings :text_formatting => 'markdown' do
-      assert_include %(<img src="/attachments/download/#{attachment.id}/caf%C3%A9.jpg" alt="" />),
-        textilizable("![](café.jpg)", :attachments => [attachment])
+      to_test.each do |filename, result|
+        attachment = Attachment.generate!(:filename => filename)
+        assert_include %(<img src="/attachments/download/#{attachment.id}/#{result}" alt="" />), textilizable("![](#{filename})", :attachments => [attachment])
+      end
     end
   end
 
   def test_attached_images_with_hires_naming
     attachment = Attachment.generate!(:filename => 'image@2x.png')
-      assert_equal %(<p><img src="/attachments/download/#{attachment.id}/image@2x.png" srcset="/attachments/download/#{attachment.id}/image@2x.png 2x" alt="" /></p>),
-        textilizable("!image@2x.png!", :attachments => [attachment])
+    assert_equal(
+        %(<p><img src="/attachments/download/#{attachment.id}/image@2x.png" srcset="/attachments/download/#{attachment.id}/image@2x.png 2x" alt="" /></p>),
+        textilizable("!image@2x.png!", :attachments => [attachment]))
   end
 
   def test_attached_images_filename_extension
-    set_tmp_attachments_directory
     a1 = Attachment.new(
             :container => Issue.find(1),
             :file => mock_file_with_options({:original_filename => "testtest.JPG"}),
@@ -234,12 +248,12 @@ RAW
     a1 = Attachment.find(16)
     assert_equal "testfile.png", a1.filename
     assert a1.readable?
-    assert (! a1.visible?(User.anonymous))
+    assert_not a1.visible?(User.anonymous)
     assert a1.visible?(User.find(2))
     a2 = Attachment.find(17)
     assert_equal "testfile.PNG", a2.filename
     assert a2.readable?
-    assert (! a2.visible?(User.anonymous))
+    assert_not a2.visible?(User.anonymous)
     assert a2.visible?(User.find(2))
     assert a1.created_on < a2.created_on
 
@@ -251,6 +265,7 @@ RAW
     }
     attachments = [a1, a2]
     to_test.each { |text, result| assert_equal "<p>#{result}</p>", textilizable(text, :attachments => attachments) }
+  ensure
     set_tmp_attachments_directory
   end
 
@@ -269,7 +284,10 @@ RAW
       '"a link":http://example.net/path!602815048C7B5C20!302.html' => '<a href="http://example.net/path!602815048C7B5C20!302.html" class="external">a link</a>',
       # escaping
       '"test":http://foo"bar' => '<a href="http://foo&quot;bar" class="external">test</a>',
-    }
+      # ends with a hyphen
+      '(see "inline link":http://www.foo.bar/Test-)' => '(see <a href="http://www.foo.bar/Test-" class="external">inline link</a>)',
+      'http://foo.bar/page?p=1&t=z&s=-' => '<a class="external" href="http://foo.bar/page?p=1&#38;t=z&#38;s=-">http://foo.bar/page?p=1&#38;t=z&#38;s=-</a>',
+      'This is an intern "link":/foo/bar-' => 'This is an intern <a href="/foo/bar-">link</a>',    }
     to_test.each { |text, result| assert_equal "<p>#{result}</p>", textilizable(text) }
   end
 
@@ -282,27 +300,72 @@ RAW
   end
 
   def test_redmine_links
-    issue_link = link_to('#3', {:controller => 'issues', :action => 'show', :id => 3},
-                               :class => Issue.find(3).css_classes, :title => 'Bug: Error 281 when updating a recipe (New)')
-    note_link = link_to('#3-14', {:controller => 'issues', :action => 'show', :id => 3, :anchor => 'note-14'},
-                               :class => Issue.find(3).css_classes, :title => 'Bug: Error 281 when updating a recipe (New)')
-    note_link2 = link_to('#3#note-14', {:controller => 'issues', :action => 'show', :id => 3, :anchor => 'note-14'},
-                               :class => Issue.find(3).css_classes, :title => 'Bug: Error 281 when updating a recipe (New)')
+    user_with_email_login = User.generate!(:login => 'abcd@example.com')
+    user_with_email_login_2 = User.generate!(:login => 'foo.bar@example.com')
+    u_email_id = user_with_email_login.id
+    u_email_id_2 = user_with_email_login_2.id
 
-    revision_link = link_to('r1', {:controller => 'repositories', :action => 'revision', :id => 'ecookbook', :rev => 1},
-                                   :class => 'changeset', :title => 'My very first commit do not escaping #<>&')
-    revision_link2 = link_to('r2', {:controller => 'repositories', :action => 'revision', :id => 'ecookbook', :rev => 2},
-                                    :class => 'changeset', :title => 'This commit fixes #1, #2 and references #1 & #3')
+    issue_link = link_to('#3',
+                         {:controller => 'issues', :action => 'show', :id => 3},
+                         :class => Issue.find(3).css_classes,
+                         :title => 'Bug: Error 281 when updating a recipe (New)')
+    ext_issue_link = link_to(
+                         'Bug #3: Error 281 when updating a recipe',
+                         {:controller => 'issues', :action => 'show', :id => 3},
+                         :class => Issue.find(3).css_classes,
+                         :title => 'Status: New')
+    note_link = link_to(
+                         '#3-14',
+                         {:controller => 'issues', :action => 'show',
+                          :id => 3, :anchor => 'note-14'},
+                         :class => Issue.find(3).css_classes,
+                         :title => 'Bug: Error 281 when updating a recipe (New)')
+    ext_note_link = link_to(
+                         'Bug #3-14: Error 281 when updating a recipe',
+                         {:controller => 'issues', :action => 'show',
+                          :id => 3, :anchor => 'note-14'},
+                         :class => Issue.find(3).css_classes,
+                         :title => 'Status: New')
+    note_link2 = link_to(
+                         '#3#note-14',
+                         {:controller => 'issues', :action => 'show',
+                          :id => 3, :anchor => 'note-14'},
+                         :class => Issue.find(3).css_classes,
+                         :title => 'Bug: Error 281 when updating a recipe (New)')
+    ext_note_link2 = link_to(
+                         'Bug #3#note-14: Error 281 when updating a recipe',
+                         {:controller => 'issues', :action => 'show',
+                          :id => 3, :anchor => 'note-14'},
+                         :class => Issue.find(3).css_classes,
+                         :title => 'Status: New')
 
-    changeset_link2 = link_to('691322a8eb01e11fd7',
-                              {:controller => 'repositories', :action => 'revision', :id => 'ecookbook', :rev => 1},
-                               :class => 'changeset', :title => 'My very first commit do not escaping #<>&')
+    revision_link = link_to(
+                         'r1',
+                         {:controller => 'repositories', :action => 'revision',
+                          :id => 'ecookbook', :repository_id => 10, :rev => 1},
+                         :class => 'changeset',
+                         :title => 'My very first commit do not escaping #<>&')
+    revision_link2 = link_to(
+                         'r2',
+                         {:controller => 'repositories', :action => 'revision',
+                          :id => 'ecookbook', :repository_id => 10, :rev => 2},
+                         :class => 'changeset',
+                         :title => 'This commit fixes #1, #2 and references #1 & #3')
 
-    document_link = link_to('Test document', {:controller => 'documents', :action => 'show', :id => 1},
-                                             :class => 'document')
+    changeset_link2 = link_to(
+                         '691322a8eb01e11fd7',
+                         {:controller => 'repositories', :action => 'revision',
+                          :id => 'ecookbook', :repository_id => 10, :rev => 1},
+                         :class => 'changeset', :title => 'My very first commit do not escaping #<>&')
 
-    version_link = link_to('1.0', {:controller => 'versions', :action => 'show', :id => 2},
-                                  :class => 'version')
+    document_link = link_to(
+                         'Test document',
+                         {:controller => 'documents', :action => 'show', :id => 1},
+                         :class => 'document')
+
+    version_link = link_to('1.0',
+                           {:controller => 'versions', :action => 'show', :id => 2},
+                           :class => 'version')
 
     board_url = {:controller => 'boards', :action => 'show', :id => 2, :project_id => 'ecookbook'}
 
@@ -312,17 +375,17 @@ RAW
 
     project_url = {:controller => 'projects', :action => 'show', :id => 'subproject1'}
 
-    source_url = '/projects/ecookbook/repository/entry/some/file'
-    source_url_with_rev = '/projects/ecookbook/repository/revisions/52/entry/some/file'
-    source_url_with_ext = '/projects/ecookbook/repository/entry/some/file.ext'
-    source_url_with_rev_and_ext = '/projects/ecookbook/repository/revisions/52/entry/some/file.ext'
-    source_url_with_branch = '/projects/ecookbook/repository/revisions/branch/entry/some/file'
+    source_url = '/projects/ecookbook/repository/10/entry/some/file'
+    source_url_with_rev = '/projects/ecookbook/repository/10/revisions/52/entry/some/file'
+    source_url_with_ext = '/projects/ecookbook/repository/10/entry/some/file.ext'
+    source_url_with_rev_and_ext = '/projects/ecookbook/repository/10/revisions/52/entry/some/file.ext'
+    source_url_with_branch = '/projects/ecookbook/repository/10/revisions/branch/entry/some/file'
 
-    export_url = '/projects/ecookbook/repository/raw/some/file'
-    export_url_with_rev = '/projects/ecookbook/repository/revisions/52/raw/some/file'
-    export_url_with_ext = '/projects/ecookbook/repository/raw/some/file.ext'
-    export_url_with_rev_and_ext = '/projects/ecookbook/repository/revisions/52/raw/some/file.ext'
-    export_url_with_branch = '/projects/ecookbook/repository/revisions/branch/raw/some/file'
+    export_url = '/projects/ecookbook/repository/10/raw/some/file'
+    export_url_with_rev = '/projects/ecookbook/repository/10/revisions/52/raw/some/file'
+    export_url_with_ext = '/projects/ecookbook/repository/10/raw/some/file.ext'
+    export_url_with_rev_and_ext = '/projects/ecookbook/repository/10/revisions/52/raw/some/file.ext'
+    export_url_with_branch = '/projects/ecookbook/repository/10/revisions/branch/raw/some/file'
 
     to_test = {
       # tickets
@@ -332,6 +395,11 @@ RAW
       '#3#note-14'                  => note_link2,
       # should not ignore leading zero
       '#03'                         => '#03',
+      # tickets with more info
+      '##3, [##3], (##3) and ##3.'  => "#{ext_issue_link}, [#{ext_issue_link}], (#{ext_issue_link}) and #{ext_issue_link}.",
+      '##3-14'                      => ext_note_link,
+      '##3#note-14'                 => ext_note_link2,
+      '##03'                        => '##03',
       # changesets
       'r1'                          => revision_link,
       'r1.'                         => "#{revision_link}.",
@@ -386,8 +454,14 @@ RAW
       "http://foo.bar/FAQ#3"        => '<a class="external" href="http://foo.bar/FAQ#3">http://foo.bar/FAQ#3</a>',
       # user
       'user:jsmith'                 => link_to_user(User.find_by_id(2)),
+      'user:JSMITH'                 => link_to_user(User.find_by_id(2)),
       'user#2'                      => link_to_user(User.find_by_id(2)),
       '@jsmith'                     => link_to_user(User.find_by_id(2)),
+      '@JSMITH'                     => link_to_user(User.find_by_id(2)),
+      '@abcd@example.com'           => link_to_user(User.find_by_id(u_email_id)),
+      'user:abcd@example.com'       => link_to_user(User.find_by_id(u_email_id)),
+      '@foo.bar@example.com'        => link_to_user(User.find_by_id(u_email_id_2)),
+      'user:foo.bar@example.com'    => link_to_user(User.find_by_id(u_email_id_2)),
       # invalid user
       'user:foobar'                 => 'user:foobar',
     }
@@ -395,18 +469,55 @@ RAW
     to_test.each { |text, result| assert_equal "<p>#{result}</p>", textilizable(text), "#{text} failed" }
   end
 
-  def test_user_links_with_email_as_login_name_should_not_be_parsed
-    u = User.generate!(:login => 'jsmith@somenet.foo')
-    raw = "@jsmith@somenet.foo should not be parsed in jsmith@somenet.foo"
+  def test_link_to_note_within_the_same_page
+    issue = Issue.find(1)
+    assert_equal '<p><a href="#note-14">#note-14</a></p>', textilizable('#note-14', :object => issue)
 
-    assert_match %r{<p><a class="user active".*>#{u.name}</a> should not be parsed in <a class="email" href="mailto:jsmith@somenet.foo">jsmith@somenet.foo</a></p>},
-      textilizable(raw, :project => Project.find(1))
+    journal = Journal.find(2)
+    assert_equal '<p><a href="#note-2">#note-2</a></p>', textilizable('#note-2', :object => journal)
+  end
+
+  def test_user_links_with_email_as_login_name_should_not_be_parsed_textile
+    with_settings :text_formatting => 'textile' do
+      u = User.generate!(:login => 'jsmith@somenet.foo')
+
+      # user link format: @jsmith@somenet.foo
+      raw = "@jsmith@somenet.foo should not be parsed in jsmith@somenet.foo"
+      assert_match(
+        %r{<p><a class="user active".*>#{u.name}</a> should not be parsed in <a class="email" href="mailto:jsmith@somenet.foo">jsmith@somenet.foo</a></p>},
+        textilizable(raw, :project => Project.find(1)))
+
+      # user link format: user:jsmith@somenet.foo
+      raw = "user:jsmith@somenet.foo should not be parsed in jsmith@somenet.foo"
+      assert_match(
+        %r{<p><a class="user active".*>#{u.name}</a> should not be parsed in <a class="email" href="mailto:jsmith@somenet.foo">jsmith@somenet.foo</a></p>},
+        textilizable(raw, :project => Project.find(1)))
+    end
+  end
+
+  def test_user_links_with_email_as_login_name_should_not_be_parsed_markdown
+    with_settings :text_formatting => 'markdown' do
+      u = User.generate!(:login => 'jsmith@somenet.foo')
+
+      # user link format: @jsmith@somenet.foo
+      raw = "@jsmith@somenet.foo should not be parsed in jsmith@somenet.foo"
+      assert_match(
+        %r{<p><a class=\"user active\".*>#{u.name}</a> should not be parsed in <a href=\"mailto:jsmith@somenet.foo\">jsmith@somenet.foo</a></p>},
+        textilizable(raw, :project => Project.find(1)))
+
+      # user link format: user:jsmith@somenet.foo
+      raw = "user:jsmith@somenet.foo should not be parsed in jsmith@somenet.foo"
+      assert_match(
+        %r{<p><a class=\"user active\".*>#{u.name}</a> should not be parsed in <a href=\"mailto:jsmith@somenet.foo\">jsmith@somenet.foo</a></p>},
+        textilizable(raw, :project => Project.find(1)))
+    end
   end
 
   def test_should_not_parse_redmine_links_inside_link
     raw = "r1 should not be parsed in http://example.com/url-r1/"
-    assert_match %r{<p><a class="changeset".*>r1</a> should not be parsed in <a class="external" href="http://example.com/url-r1/">http://example.com/url-r1/</a></p>},
-      textilizable(raw, :project => Project.find(1))
+    assert_match(
+      %r{<p><a class="changeset".*>r1</a> should not be parsed in <a class="external" href="http://example.com/url-r1/">http://example.com/url-r1/</a></p>},
+      textilizable(raw, :project => Project.find(1)))
   end
 
   def test_redmine_links_with_a_different_project_before_current_project
@@ -439,11 +550,11 @@ RAW
   def test_cross_project_redmine_links
     source_link = link_to('ecookbook:source:/some/file',
                           {:controller => 'repositories', :action => 'entry',
-                           :id => 'ecookbook', :path => ['some', 'file']},
+                           :id => 'ecookbook', :repository_id => 10, :path => ['some', 'file']},
                           :class => 'source')
     changeset_link = link_to('ecookbook:r2',
                              {:controller => 'repositories', :action => 'revision',
-                              :id => 'ecookbook', :rev => 2},
+                              :id => 'ecookbook', :repository_id => 10, :rev => 2},
                              :class => 'changeset',
                              :title => 'This commit fixes #1, #2 and references #1 & #3')
     to_test = {
@@ -521,15 +632,32 @@ RAW
     hg = Repository::Mercurial.create!(:project_id => 1, :identifier => 'hg1', :url => '/foo/hg')
     Changeset.create!(:repository => hg, :committed_on => Time.now, :revision => '123', :scmid => 'abcd')
 
-    changeset_link = link_to('r2', {:controller => 'repositories', :action => 'revision', :id => 'ecookbook', :rev => 2},
-                                    :class => 'changeset', :title => 'This commit fixes #1, #2 and references #1 & #3')
-    svn_changeset_link = link_to('svn_repo-1|r123', {:controller => 'repositories', :action => 'revision', :id => 'ecookbook', :repository_id => 'svn_repo-1', :rev => 123},
-                                    :class => 'changeset', :title => '')
-    hg_changeset_link = link_to('hg1|abcd', {:controller => 'repositories', :action => 'revision', :id => 'ecookbook', :repository_id => 'hg1', :rev => 'abcd'},
-                                    :class => 'changeset', :title => '')
-
-    source_link = link_to('source:some/file', {:controller => 'repositories', :action => 'entry', :id => 'ecookbook', :path => ['some', 'file']}, :class => 'source')
-    hg_source_link = link_to('source:hg1|some/file', {:controller => 'repositories', :action => 'entry', :id => 'ecookbook', :repository_id => 'hg1', :path => ['some', 'file']}, :class => 'source')
+    changeset_link = link_to(
+                       'r2',
+                       {:controller => 'repositories', :action => 'revision',
+                        :id => 'ecookbook', :repository_id => 10, :rev => 2},
+                       :class => 'changeset',
+                       :title => 'This commit fixes #1, #2 and references #1 & #3')
+    svn_changeset_link = link_to(
+                           'svn_repo-1|r123',
+                           {:controller => 'repositories', :action => 'revision',
+                            :id => 'ecookbook', :repository_id => 'svn_repo-1', :rev => 123},
+                           :class => 'changeset', :title => '')
+    hg_changeset_link = link_to(
+                          'hg1|abcd',
+                          {:controller => 'repositories', :action => 'revision',
+                           :id => 'ecookbook', :repository_id => 'hg1', :rev => 'abcd'},
+                          :class => 'changeset', :title => '')
+    source_link = link_to('source:some/file',
+                          {:controller => 'repositories', :action => 'entry',
+                           :id => 'ecookbook', :repository_id => 10,
+                           :path => ['some', 'file']},
+                          :class => 'source')
+    hg_source_link = link_to('source:hg1|some/file',
+                             {:controller => 'repositories', :action => 'entry',
+                              :id => 'ecookbook', :repository_id => 'hg1',
+                              :path => ['some', 'file']},
+                             :class => 'source')
 
     to_test = {
       'r2'                          => changeset_link,
@@ -553,16 +681,31 @@ RAW
     hg = Repository::Mercurial.create!(:project_id => 1, :identifier => 'hg1', :url => '/foo/hg')
     Changeset.create!(:repository => hg, :committed_on => Time.now, :revision => '123', :scmid => 'abcd')
 
-    changeset_link = link_to('ecookbook:r2', {:controller => 'repositories', :action => 'revision', :id => 'ecookbook', :rev => 2},
-                                    :class => 'changeset', :title => 'This commit fixes #1, #2 and references #1 & #3')
-    svn_changeset_link = link_to('ecookbook:svn1|r123', {:controller => 'repositories', :action => 'revision', :id => 'ecookbook', :repository_id => 'svn1', :rev => 123},
-                                    :class => 'changeset', :title => '')
-    hg_changeset_link = link_to('ecookbook:hg1|abcd', {:controller => 'repositories', :action => 'revision', :id => 'ecookbook', :repository_id => 'hg1', :rev => 'abcd'},
-                                    :class => 'changeset', :title => '')
+    changeset_link = link_to(
+                       'ecookbook:r2',
+                       {:controller => 'repositories', :action => 'revision',
+                        :id => 'ecookbook', :repository_id => 10, :rev => 2},
+                       :class => 'changeset',
+                       :title => 'This commit fixes #1, #2 and references #1 & #3')
+    svn_changeset_link = link_to(
+                           'ecookbook:svn1|r123',
+                           {:controller => 'repositories', :action => 'revision',
+                            :id => 'ecookbook', :repository_id => 'svn1', :rev => 123},
+                           :class => 'changeset', :title => '')
+    hg_changeset_link = link_to(
+                          'ecookbook:hg1|abcd',
+                          {:controller => 'repositories', :action => 'revision',
+                           :id => 'ecookbook', :repository_id => 'hg1', :rev => 'abcd'},
+                          :class => 'changeset', :title => '')
 
-    source_link = link_to('ecookbook:source:some/file', {:controller => 'repositories', :action => 'entry', :id => 'ecookbook', :path => ['some', 'file']}, :class => 'source')
-    hg_source_link = link_to('ecookbook:source:hg1|some/file', {:controller => 'repositories', :action => 'entry', :id => 'ecookbook', :repository_id => 'hg1', :path => ['some', 'file']}, :class => 'source')
-
+    source_link = link_to('ecookbook:source:some/file',
+                          {:controller => 'repositories', :action => 'entry',
+                           :id => 'ecookbook', :repository_id => 10,
+                           :path => ['some', 'file']}, :class => 'source')
+    hg_source_link = link_to('ecookbook:source:hg1|some/file',
+                             {:controller => 'repositories', :action => 'entry',
+                              :id => 'ecookbook', :repository_id => 'hg1',
+                              :path => ['some', 'file']}, :class => 'source')
     to_test = {
       'ecookbook:r2'                           => changeset_link,
       'ecookbook:svn1|r123'                    => svn_changeset_link,
@@ -576,72 +719,74 @@ RAW
       'ecookbook:source:invalid|some/file'     => 'ecookbook:source:invalid|some/file',
       'invalid:source:invalid|some/file'       => 'invalid:source:invalid|some/file',
     }
-
     @project = Project.find(3)
     to_test.each { |text, result| assert_equal "<p>#{result}</p>", textilizable(text), "#{text} failed" }
   end
 
   def test_redmine_links_git_commit
-    changeset_link = link_to('abcd',
-                               {
-                                 :controller => 'repositories',
-                                 :action     => 'revision',
-                                 :id         => 'subproject1',
-                                 :rev        => 'abcd',
-                                },
-                              :class => 'changeset', :title => 'test commit')
-    to_test = {
-      'commit:abcd' => changeset_link,
-     }
     @project = Project.find(3)
     r = Repository::Git.create!(:project => @project, :url => '/tmp/test/git')
-    assert r
-    c = Changeset.new(:repository => r,
+    c = Changeset.create!(
+                      :repository => r,
                       :committed_on => Time.now,
                       :revision => 'abcd',
                       :scmid => 'abcd',
                       :comments => 'test commit')
-    assert( c.save )
+    changeset_link = link_to('abcd',
+                             {
+                                 :controller => 'repositories',
+                                 :action     => 'revision',
+                                 :id         => 'subproject1',
+                                 :repository_id => r.id,
+                                 :rev        => 'abcd',
+                              },
+                             :class => 'changeset', :title => 'test commit')
+    to_test = {
+      'commit:abcd' => changeset_link,
+     }
     to_test.each { |text, result| assert_equal "<p>#{result}</p>", textilizable(text) }
   end
 
   # TODO: Bazaar commit id contains mail address, so it contains '@' and '_'.
   def test_redmine_links_mercurial_commit
-    changeset_link_rev = link_to('r123',
-                                  {
+    @project = Project.find(3)
+    r = Repository::Mercurial.create!(:project => @project, :url => '/tmp/test')
+    c = Changeset.create!(
+                      :repository => r,
+                      :committed_on => Time.now,
+                      :revision => '123',
+                      :scmid => 'abcd',
+                      :comments => 'test commit')
+    changeset_link_rev = link_to(
+                              'r123',
+                              {
                                      :controller => 'repositories',
                                      :action     => 'revision',
                                      :id         => 'subproject1',
-                                     :rev        => '123' ,
-                                  },
+                                     :repository_id => r.id,
+                                     :rev        => '123',
+                              },
                               :class => 'changeset', :title => 'test commit')
-    changeset_link_commit = link_to('abcd',
-                                  {
-                                        :controller => 'repositories',
-                                        :action     => 'revision',
-                                        :id         => 'subproject1',
-                                        :rev        => 'abcd' ,
-                                  },
+    changeset_link_commit = link_to(
+                              'abcd',
+                              {
+                                    :controller => 'repositories',
+                                    :action     => 'revision',
+                                    :id         => 'subproject1',
+                                    :repository_id => r.id,
+                                    :rev        => 'abcd',
+                              },
                               :class => 'changeset', :title => 'test commit')
     to_test = {
       'r123' => changeset_link_rev,
       'commit:abcd' => changeset_link_commit,
      }
-    @project = Project.find(3)
-    r = Repository::Mercurial.create!(:project => @project, :url => '/tmp/test')
-    assert r
-    c = Changeset.new(:repository => r,
-                      :committed_on => Time.now,
-                      :revision => '123',
-                      :scmid => 'abcd',
-                      :comments => 'test commit')
-    assert( c.save )
     to_test.each { |text, result| assert_equal "<p>#{result}</p>", textilizable(text) }
   end
 
   def test_attachment_links
     text = 'attachment:error281.txt'
-    result = link_to("error281.txt", "/attachments/1/error281.txt",
+    result = link_to("error281.txt", "/attachments/1",
                      :class => "attachment")
     assert_equal "<p>#{result}</p>",
                  textilizable(text,
@@ -650,13 +795,28 @@ RAW
   end
 
   def test_attachment_link_should_link_to_latest_attachment
-    set_tmp_attachments_directory
     a1 = Attachment.generate!(:filename => "test.txt", :created_on => 1.hour.ago)
     a2 = Attachment.generate!(:filename => "test.txt")
-    result = link_to("test.txt", "/attachments/#{a2.id}/test.txt",
+    result = link_to("test.txt", "/attachments/#{a2.id}",
                      :class => "attachment")
     assert_equal "<p>#{result}</p>",
                  textilizable('attachment:test.txt', :attachments => [a1, a2])
+  end
+
+  def test_attachment_links_to_images_with_email_format_should_not_be_parsed
+    attachment = Attachment.generate!(:filename => 'image@2x.png')
+    with_settings :text_formatting => 'textile' do
+      raw = "attachment:image@2x.png should not be parsed in image@2x.png"
+      assert_match(
+        %r{<p><a class="attachment" href="/attachments/#{attachment.id}">image@2x.png</a> should not be parsed in image@2x.png</p>},
+        textilizable(raw, :attachments => [attachment]))
+    end
+    with_settings :text_formatting => 'markdown' do
+      raw = "attachment:image@2x.png should not be parsed in image@2x.png"
+      assert_match(
+        %r{<p><a class="attachment" href="/attachments/#{attachment.id}">image@2x.png</a> should not be parsed in image@2x.png</p>},
+        textilizable(raw, :attachments => [attachment]))
+    end
   end
 
   def test_wiki_links
@@ -693,6 +853,15 @@ RAW
       "[[Another_page##{@russian_test}|#{@russian_test}]]" =>
           link_to(@russian_test,
                   "/projects/ecookbook/wiki/Another_page##{russian_eacape}",
+                  :class => "wiki-page"),
+      # link to anchor
+      '[[#anchor]]' =>
+          link_to("#anchor",
+                  "#anchor",
+                  :class => "wiki-page"),
+      '[[#anchor|One-section]]' =>
+          link_to("One-section",
+                  "#anchor",
                   :class => "wiki-page"),
       # page that doesn't exist
       '[[Unknown page]]' =>
@@ -750,6 +919,66 @@ RAW
     to_test.each { |text, result| assert_equal "<p>#{result}</p>", textilizable(text) }
   end
 
+  def test_wiki_links_with_special_characters_should_work_in_textile
+    to_test = wiki_links_with_special_characters
+
+    @project = Project.find(1)
+    with_settings :text_formatting => 'textile' do
+      to_test.each { |text, result| assert_equal "<p>#{result}</p>", textilizable(text) }
+    end
+  end
+
+  def test_wiki_links_with_special_characters_should_work_in_markdown
+    to_test = wiki_links_with_special_characters
+
+    @project = Project.find(1)
+    with_settings :text_formatting => 'markdown' do
+      to_test.each { |text, result| assert_equal "<p>#{result}</p>", textilizable(text).strip }
+    end
+  end
+
+  def test_wiki_links_with_square_brackets_in_project_name
+    User.current = User.find_by_login('jsmith')
+
+    another_project = Project.find(1) # eCookbook
+    another_project.name = "[foo]#{another_project.name}"
+    another_project.save
+
+    page = another_project.wiki.find_page('Another page')
+    page.title = "[bar]#{page.title}"
+    page.save
+
+    to_test = {
+      '[[[foo]eCookbook:]]' =>
+          link_to("[foo]eCookbook",
+                  "/projects/ecookbook/wiki",
+                  :class => "wiki-page"),
+      '[[[foo]eCookbook:CookBook documentation]]' =>
+          link_to("CookBook documentation",
+                  "/projects/ecookbook/wiki/CookBook_documentation",
+                  :class => "wiki-page"),
+      '[[[foo]eCookbook:[bar]Another page]]' =>
+          link_to("[bar]Another page",
+                  "/projects/ecookbook/wiki/%5Bbar%5DAnother_page",
+                  :class => "wiki-page"),
+      '[[[foo]eCookbook:Unknown page]]' =>
+          link_to("Unknown page",
+                  "/projects/ecookbook/wiki/Unknown_page",
+                  :class => "wiki-page new"),
+      '[[[foo]eCookbook:[baz]Unknown page]]' =>
+          link_to("[baz]Unknown page",
+                  "/projects/ecookbook/wiki/%5Bbaz%5DUnknown_page",
+                  :class => "wiki-page new"),
+    }
+    @project = Project.find(2)  # OnlineStore
+    with_settings :text_formatting => 'textile' do
+      to_test.each { |text, result| assert_equal "<p>#{result}</p>", textilizable(text) }
+    end
+    with_settings :text_formatting => 'markdown' do
+      to_test.each { |text, result| assert_equal "<p>#{result}</p>", textilizable(text).strip }
+    end
+  end
+
   def test_wiki_links_within_local_file_generation_context
     to_test = {
       # link to a page
@@ -786,7 +1015,7 @@ RAW
   end
 
   def test_wiki_links_within_wiki_page_context
-    page = WikiPage.find_by_title('Another_page' )
+    page = WikiPage.find_by_title('Another_page')
     to_test = {
       '[[CookBook documentation]]' =>
          link_to("CookBook documentation",
@@ -842,7 +1071,7 @@ RAW
     @project = Project.find(1)
     to_test.each do |text, result|
       assert_equal "<p>#{result}</p>",
-                   textilizable(WikiContent.new( :text => text, :page => page ), :text)
+                   textilizable(WikiContent.new(:text => text, :page => page), :text)
     end
   end
 
@@ -910,7 +1139,7 @@ RAW
       '<pre><code class=""onmouseover="alert(1)">text</code></pre>' => '<pre><code>text</code></pre>',
       '<pre class=""onmouseover="alert(1)">text</pre>' => '<pre>text</pre>',
     }
-    to_test.each { |text, result| assert_equal result, textilizable(text) }
+    to_test.each {|text, result| assert_equal result, textilizable(text)}
   end
 
   def test_allowed_html_tags
@@ -919,44 +1148,41 @@ RAW
       "<notextile>no *textile* formatting</notextile>" => "no *textile* formatting",
       "<notextile>this is <tag>a tag</tag></notextile>" => "this is &lt;tag&gt;a tag&lt;/tag&gt;"
     }
-    to_test.each { |text, result| assert_equal result, textilizable(text) }
+    to_test.each {|text, result| assert_equal result, textilizable(text)}
   end
 
   def test_pre_tags
-    raw = <<-RAW
-Before
+    raw = <<~RAW
+      Before
 
-<pre>
-<prepared-statement-cache-size>32</prepared-statement-cache-size>
-</pre>
+      <pre>
+      <prepared-statement-cache-size>32</prepared-statement-cache-size>
+      </pre>
 
-After
-RAW
-
-    expected = <<-EXPECTED
-<p>Before</p>
-<pre>
-&lt;prepared-statement-cache-size&gt;32&lt;/prepared-statement-cache-size&gt;
-</pre>
-<p>After</p>
-EXPECTED
-
+      After
+    RAW
+    expected = <<~EXPECTED
+      <p>Before</p>
+      <pre>
+      &lt;prepared-statement-cache-size&gt;32&lt;/prepared-statement-cache-size&gt;
+      </pre>
+      <p>After</p>
+    EXPECTED
     assert_equal expected.gsub(%r{[\r\n\t]}, ''), textilizable(raw).gsub(%r{[\r\n\t]}, '')
   end
 
   def test_pre_content_should_not_parse_wiki_and_redmine_links
-    raw = <<-RAW
-[[CookBook documentation]]
+    raw = <<~RAW
+      [[CookBook documentation]]
 
-#1
+      #1
 
-<pre>
-[[CookBook documentation]]
+      <pre>
+      [[CookBook documentation]]
 
-#1
-</pre>
-RAW
-
+      #1
+      </pre>
+    RAW
     result1 = link_to("CookBook documentation",
                       "/projects/ecookbook/wiki/CookBook_documentation",
                       :class => "wiki-page")
@@ -964,31 +1190,27 @@ RAW
                       "/issues/1",
                       :class => Issue.find(1).css_classes,
                       :title => "Bug: Cannot print recipes (New)")
+    expected = <<~EXPECTED
+      <p>#{result1}</p>
+      <p>#{result2}</p>
+      <pre>
+      [[CookBook documentation]]
 
-    expected = <<-EXPECTED
-<p>#{result1}</p>
-<p>#{result2}</p>
-<pre>
-[[CookBook documentation]]
-
-#1
-</pre>
-EXPECTED
-
+      #1
+      </pre>
+    EXPECTED
     @project = Project.find(1)
     assert_equal expected.gsub(%r{[\r\n\t]}, ''), textilizable(raw).gsub(%r{[\r\n\t]}, '')
   end
 
   def test_non_closing_pre_blocks_should_be_closed
-    raw = <<-RAW
-<pre><code>
-RAW
-
-    expected = <<-EXPECTED
-<pre><code>
-</code></pre>
-EXPECTED
-
+    raw = <<~RAW
+      <pre><code>
+    RAW
+    expected = <<~EXPECTED
+      <pre><code>
+      </code></pre>
+    EXPECTED
     @project = Project.find(1)
     assert_equal expected.gsub(%r{[\r\n\t]}, ''), textilizable(raw).gsub(%r{[\r\n\t]}, '')
   end
@@ -1000,18 +1222,34 @@ EXPECTED
   end
 
   def test_syntax_highlight
-    raw = <<-RAW
-<pre><code class="ruby">
-# Some ruby code here
-</code></pre>
-RAW
-
-    expected = <<-EXPECTED
-<pre><code class="ruby syntaxhl"><span class=\"CodeRay\"><span class="comment"># Some ruby code here</span></span>
-</code></pre>
-EXPECTED
-
+    raw = <<~RAW
+      <pre><code class="ECMA_script">
+      /* Hello */
+      document.write("Hello World!");
+      </code></pre>
+    RAW
+    expected = <<~EXPECTED
+      <pre><code class="ECMA_script syntaxhl"><span class="cm">/* Hello */</span><span class="nb">document</span><span class="p">.</span><span class="nx">write</span><span class="p">(</span><span class="dl">"</span><span class="s2">Hello World!</span><span class="dl">"</span><span class="p">);</span></code></pre>
+    EXPECTED
     assert_equal expected.gsub(%r{[\r\n\t]}, ''), textilizable(raw).gsub(%r{[\r\n\t]}, '')
+  end
+
+  def test_syntax_highlight_ampersand_in_textile
+    raw = <<~RAW
+      <pre><code class="ruby">
+      x = a & b
+      </code></pre>
+    RAW
+    expected = <<~EXPECTED
+      <pre><code class=\"ruby syntaxhl\"><span class=\"n\">x</span> <span class=\"o\">=</span> <span class=\"n\">a</span> <span class=\"o\">&amp;</span> <span class=\"n\">b</span></code></pre>
+    EXPECTED
+    with_settings :text_formatting => 'textile' do
+      assert_equal expected.gsub(%r{[\r\n\t]}, ''), textilizable(raw).gsub(%r{[\r\n\t]}, '')
+    end
+  end
+
+  def test_syntax_highlight_should_normalize_line_endings
+    assert_equal "line 1\nline 2\n", syntax_highlight("test.txt", "line 1\rline 2\r\n")
   end
 
   def test_to_path_param
@@ -1040,27 +1278,12 @@ EXPECTED
                'a H *umane* W *eb* T *ext* G *enerator*' => 'a H <strong>umane</strong> W <strong>eb</strong> T <strong>ext</strong> G <strong>enerator</strong>',
                'a *H* umane *W* eb *T* ext *G* enerator' => 'a <strong>H</strong> umane <strong>W</strong> eb <strong>T</strong> ext <strong>G</strong> enerator',
               }
-    to_test.each { |text, result| assert_equal "<p>#{result}</p>", textilizable(text) }
+    to_test.each {|text, result| assert_equal "<p>#{result}</p>", textilizable(text)}
   end
 
   def test_wiki_horizontal_rule
     assert_equal '<hr />', textilizable('---')
     assert_equal '<p>Dashes: ---</p>', textilizable('Dashes: ---')
-  end
-
-  def test_footnotes
-    raw = <<-RAW
-This is some text[1].
-
-fn1. This is the foot note
-RAW
-
-    expected = <<-EXPECTED
-<p>This is some text<sup><a href=\"#fn1\">1</a></sup>.</p>
-<p id="fn1" class="footnote"><sup>1</sup> This is the foot note</p>
-EXPECTED
-
-    assert_equal expected.gsub(%r{[\r\n\t]}, ''), textilizable(raw).gsub(%r{[\r\n\t]}, '')
   end
 
   def test_headings
@@ -1081,48 +1304,44 @@ EXPECTED
   end
 
   def test_headings_in_wiki_single_page_export_should_be_prepended_with_page_title
-    page = WikiPage.new( :title => 'Page Title', :wiki_id => 1 )
-    content = WikiContent.new( :text => 'h1. Some heading', :page => page )
-
+    page = WikiPage.new(:title => 'Page Title', :wiki_id => 1)
+    content = WikiContent.new(:text => 'h1. Some heading', :page => page)
     expected = %|<a name="Page_Title_Some-heading"></a>\n<h1 >Some heading<a href="#Page_Title_Some-heading" class="wiki-anchor">&para;</a></h1>|
-
-    assert_equal expected, textilizable(content, :text, :wiki_links => :anchor )
+    assert_equal expected, textilizable(content, :text, :wiki_links => :anchor)
   end
 
   def test_table_of_content
     set_language_if_valid 'en'
+    raw = <<~RAW
+      {{toc}}
 
-    raw = <<-RAW
-{{toc}}
+      h1. Title
 
-h1. Title
+      Lorem ipsum dolor sit amet, consectetuer adipiscing elit. Maecenas sed libero.
 
-Lorem ipsum dolor sit amet, consectetuer adipiscing elit. Maecenas sed libero.
+      h2. Subtitle with a [[Wiki]] link
 
-h2. Subtitle with a [[Wiki]] link
+      Nullam commodo metus accumsan nulla. Curabitur lobortis dui id dolor.
 
-Nullam commodo metus accumsan nulla. Curabitur lobortis dui id dolor.
+      h2. Subtitle with [[Wiki|another Wiki]] link
 
-h2. Subtitle with [[Wiki|another Wiki]] link
+      h2. Subtitle with %{color:red}red text%
 
-h2. Subtitle with %{color:red}red text%
+      <pre>
+      some code
+      </pre>
 
-<pre>
-some code
-</pre>
+      h3. Subtitle with *some* _modifiers_
 
-h3. Subtitle with *some* _modifiers_
+      h3. Subtitle with @inline code@
 
-h3. Subtitle with @inline code@
+      h1. Another title
 
-h1. Another title
+      h3. An "Internet link":http://www.redmine.org/ inside subtitle
 
-h3. An "Internet link":http://www.redmine.org/ inside subtitle
+      h2. "Project Name !/attachments/1234/logo_small.gif! !/attachments/5678/logo_2.png!":/projects/projectname/issues
 
-h2. "Project Name !/attachments/1234/logo_small.gif! !/attachments/5678/logo_2.png!":/projects/projectname/issues
-
-RAW
-
+    RAW
     expected =  '<ul class="toc">' +
                   '<li><strong>Table of contents</strong></li>' +
                   '<li><a href="#Title">Title</a>' +
@@ -1155,17 +1374,15 @@ RAW
 
   def test_table_of_content_should_generate_unique_anchors
     set_language_if_valid 'en'
+    raw = <<~RAW
+      {{toc}}
 
-    raw = <<-RAW
-{{toc}}
+      h1. Title
 
-h1. Title
+      h2. Subtitle
 
-h2. Subtitle
-
-h2. Subtitle
-RAW
-
+      h2. Subtitle
+    RAW
     expected =  '<ul class="toc">' +
                   '<li><strong>Table of contents</strong></li>' +
                   '<li><a href="#Title">Title</a>' +
@@ -1175,7 +1392,6 @@ RAW
                     '</ul>' +
                   '</li>' +
                 '</ul>'
-
     @project = Project.find(1)
     result = textilizable(raw).gsub("\n", "")
     assert_include expected, result
@@ -1185,21 +1401,18 @@ RAW
 
   def test_table_of_content_should_contain_included_page_headings
     set_language_if_valid 'en'
+    raw = <<~RAW
+      {{toc}}
 
-    raw = <<-RAW
-{{toc}}
+      h1. Included
 
-h1. Included
-
-{{include(Child_1)}}
-RAW
-
+      {{include(Child_1)}}
+    RAW
     expected = '<ul class="toc">' +
                '<li><strong>Table of contents</strong></li>' +
                '<li><a href="#Included">Included</a></li>' +
                '<li><a href="#Child-page-1">Child page 1</a></li>' +
                '</ul>'
-
     @project = Project.find(1)
     assert textilizable(raw).gsub("\n", "").include?(expected)
   end
@@ -1223,45 +1436,49 @@ RAW
   end
 
   def test_section_edit_links
-    raw = <<-RAW
-h1. Title
+    raw = <<~RAW
+      h1. Title
 
-Lorem ipsum dolor sit amet, consectetuer adipiscing elit. Maecenas sed libero.
+      Lorem ipsum dolor sit amet, consectetuer adipiscing elit. Maecenas sed libero.
 
-h2. Subtitle with a [[Wiki]] link
+      h2. Subtitle with a [[Wiki]] link
 
-h2. Subtitle with *some* _modifiers_
+      h2. Subtitle with *some* _modifiers_
 
-h2. Subtitle with @inline code@
+      h2. Subtitle with @inline code@
 
-<pre>
-some code
+      <pre>
+      some code
 
-h2. heading inside pre
+      h2. heading inside pre
 
-<h2>html heading inside pre</h2>
-</pre>
+      <h2>html heading inside pre</h2>
+      </pre>
 
-h2. Subtitle after pre tag
-RAW
-
+      h2. Subtitle after pre tag
+    RAW
     @project = Project.find(1)
     set_language_if_valid 'en'
-    result = textilizable(raw, :edit_section_links => {:controller => 'wiki', :action => 'edit', :project_id => '1', :id => 'Test'}).gsub("\n", "")
-
+    result = textilizable(
+               raw,
+               :edit_section_links =>
+                 {:controller => 'wiki', :action => 'edit',
+                  :project_id => '1', :id => 'Test'}
+             ).gsub("\n", "")
     # heading that contains inline code
-    assert_match Regexp.new('<div class="contextual heading-2" title="Edit this section" id="section-4">' +
+    assert_match(
+      Regexp.new('<div class="contextual heading-2" title="Edit this section" id="section-4">' +
       '<a class="icon-only icon-edit" href="/projects/1/wiki/Test/edit\?section=4">Edit this section</a></div>' +
       '<a name="Subtitle-with-inline-code"></a>' +
       '<h2 >Subtitle with <code>inline code</code><a href="#Subtitle-with-inline-code" class="wiki-anchor">&para;</a></h2>'),
-      result
-
+      result)
     # last heading
-    assert_match Regexp.new('<div class="contextual heading-2" title="Edit this section" id="section-5">' +
+    assert_match(
+      Regexp.new('<div class="contextual heading-2" title="Edit this section" id="section-5">' +
       '<a class="icon-only icon-edit" href="/projects/1/wiki/Test/edit\?section=5">Edit this section</a></div>' +
       '<a name="Subtitle-after-pre-tag"></a>' +
       '<h2 >Subtitle after pre tag<a href="#Subtitle-after-pre-tag" class="wiki-anchor">&para;</a></h2>'),
-      result
+      result)
   end
 
   def test_default_formatter
@@ -1280,48 +1497,70 @@ RAW
   end
 
   def test_parse_redmine_links_should_handle_a_tag_without_attributes
-    text = '<a>http://example.com</a>'
+    text = +'<a>http://example.com</a>'
     expected = text.dup
     parse_redmine_links(text, nil, nil, nil, true, {})
     assert_equal expected, text
   end
 
   def test_due_date_distance_in_words
-    to_test = { Date.today => 'Due in 0 days',
-                Date.today + 1 => 'Due in 1 day',
-                Date.today + 100 => 'Due in about 3 months',
-                Date.today + 20000 => 'Due in over 54 years',
-                Date.today - 1 => '1 day late',
-                Date.today - 100 => 'about 3 months late',
-                Date.today - 20000 => 'over 54 years late',
-               }
+    to_test = {
+      Date.today => 'Due in 0 days',
+      Date.today + 1 => 'Due in 1 day',
+      Date.today + 100 => 'Due in about 3 months',
+      Date.today + 20000 => 'Due in over 54 years',
+      Date.today - 1 => '1 day late',
+      Date.today - 100 => 'about 3 months late',
+      Date.today - 20000 => 'over 54 years late',
+    }
     ::I18n.locale = :en
     to_test.each do |date, expected|
       assert_equal expected, due_date_distance_in_words(date)
     end
   end
 
-  def test_avatar_enabled
-    with_settings :gravatar_enabled => '1' do
-      assert avatar(User.find_by_mail('jsmith@somenet.foo')).include?(Digest::MD5.hexdigest('jsmith@somenet.foo'))
-      assert avatar('jsmith <jsmith@somenet.foo>').include?(Digest::MD5.hexdigest('jsmith@somenet.foo'))
-      # Default size is 50
-      assert avatar('jsmith <jsmith@somenet.foo>').include?('size=50')
-      assert avatar('jsmith <jsmith@somenet.foo>', :size => 24).include?('size=24')
-      # Non-avatar options should be considered html options
-      assert avatar('jsmith <jsmith@somenet.foo>', :title => 'John Smith').include?('title="John Smith"')
-      # The default class of the img tag should be gravatar
-      assert avatar('jsmith <jsmith@somenet.foo>').include?('class="gravatar"')
-      assert !avatar('jsmith <jsmith@somenet.foo>', :class => 'picture').include?('class="gravatar"')
-      assert_nil avatar('jsmith')
-      assert_nil avatar(nil)
-    end
+  def test_render_page_hierarchy
+    parent_page = WikiPage.find(1)
+    child_page = WikiPage.find_by(parent_id: parent_page.id)
+    pages_by_parent_id = {nil => [parent_page], parent_page.id => [child_page]}
+    result = render_page_hierarchy(pages_by_parent_id, nil)
+    assert_select_in(
+      result, 'ul.pages-hierarchy li a[href=?]',
+      project_wiki_page_path(project_id: parent_page.project,
+                             id: parent_page.title, version: nil))
+    assert_select_in(
+      result, 'ul.pages-hierarchy li ul.pages-hierarchy a[href=?]',
+      project_wiki_page_path(project_id: child_page.project,
+                             id: child_page.title, version: nil))
   end
 
-  def test_avatar_disabled
-    with_settings :gravatar_enabled => '0' do
-      assert_equal '', avatar(User.find_by_mail('jsmith@somenet.foo'))
-    end
+  def test_render_page_hierarchy_with_timestamp
+    parent_page = WikiPage.find(1)
+    child_page = WikiPage.find_by(parent_id: parent_page.id)
+    pages_by_parent_id = {nil => [parent_page], parent_page.id => [child_page]}
+    result = render_page_hierarchy(pages_by_parent_id, nil, :timestamp => true)
+    assert_select_in(
+      result, 'ul.pages-hierarchy li a[title=?]',
+      l(:label_updated_time,
+        distance_of_time_in_words(Time.now, parent_page.updated_on)))
+    assert_select_in(
+      result, 'ul.pages-hierarchy li ul.pages-hierarchy a[title=?]',
+      l(:label_updated_time,
+        distance_of_time_in_words(Time.now, child_page.updated_on)))
+  end
+
+  def test_render_page_hierarchy_when_action_is_export
+    parent_page = WikiPage.find(1)
+    child_page = WikiPage.find_by(parent_id: parent_page.id)
+    pages_by_parent_id = {nil => [parent_page], parent_page.id => [child_page]}
+
+    # Change controller and action using stub
+    controller.stubs(:controller_name).returns('wiki')
+    controller.stubs(:action_name).returns("export")
+
+    result = render_page_hierarchy(pages_by_parent_id, nil)
+    assert_select_in result, 'ul.pages-hierarchy li a[href=?]', "##{parent_page.title}"
+    assert_select_in result, 'ul.pages-hierarchy li ul.pages-hierarchy a[href=?]', "##{child_page.title}"
   end
 
   def test_link_to_user
@@ -1347,6 +1586,19 @@ RAW
     end
   end
 
+  def test_link_to_group_should_return_only_group_name_for_non_admin_users
+    User.current = nil
+    group = Group.find(10)
+    assert_equal "A Team", link_to_group(group)
+  end
+
+  def test_link_to_group_should_link_to_group_edit_page_for_admin_users
+    User.current = User.find(1)
+    group = Group.find(10)
+    result = link_to("A Team", "/groups/10/edit")
+    assert_equal result, link_to_group(group)
+  end
+
   def test_link_to_user_should_not_link_to_anonymous
     user = User.anonymous
     assert user.anonymous?
@@ -1356,24 +1608,30 @@ RAW
 
   def test_link_to_attachment
     a = Attachment.find(3)
-    assert_equal '<a href="/attachments/3/logo.gif">logo.gif</a>',
-      link_to_attachment(a)
-    assert_equal '<a href="/attachments/3/logo.gif">Text</a>',
-      link_to_attachment(a, :text => 'Text')
-    result = link_to("logo.gif", "/attachments/3/logo.gif", :class => "foo")
-    assert_equal result,
-      link_to_attachment(a, :class => 'foo')
-    assert_equal '<a href="/attachments/download/3/logo.gif">logo.gif</a>',
-      link_to_attachment(a, :download => true)
-    assert_equal '<a href="http://test.host/attachments/3/logo.gif">logo.gif</a>',
-      link_to_attachment(a, :only_path => false)
+    assert_equal(
+      '<a href="/attachments/3">logo.gif</a>',
+      link_to_attachment(a))
+    assert_equal(
+      '<a href="/attachments/3">Text</a>',
+      link_to_attachment(a, :text => 'Text'))
+    result = link_to("logo.gif", "/attachments/3", :class => "foo")
+    assert_equal(
+      result,
+      link_to_attachment(a, :class => 'foo'))
+    assert_equal(
+      '<a href="/attachments/download/3/logo.gif">logo.gif</a>',
+      link_to_attachment(a, :download => true))
+    assert_equal(
+      '<a href="http://test.host/attachments/3">logo.gif</a>',
+      link_to_attachment(a, :only_path => false))
   end
 
   def test_thumbnail_tag
     a = Attachment.find(3)
-    assert_select_in thumbnail_tag(a),
-      'a[href=?][title=?] img[alt="3"][src=?]',
-      "/attachments/3/logo.gif", "logo.gif", "/attachments/thumbnail/3"
+    assert_select_in(
+      thumbnail_tag(a),
+      'a[href=?][title=?] img[src=?]',
+      "/attachments/3", "logo.gif", "/attachments/thumbnail/3")
   end
 
   def test_link_to_project
@@ -1402,27 +1660,98 @@ RAW
                  link_to_project(Project.find(1))
   end
 
+  def test_link_to_record
+    [
+      [custom_values(:custom_values_007), '<a href="/projects/ecookbook">eCookbook</a>'],
+      [documents(:documents_001),         '<a href="/documents/1">Test document</a>'],
+      [Group.find(10),                    '<a href="/groups/10">A Team</a>'],
+      [issues(:issues_001),               link_to_issue(issues(:issues_001), :subject => false)],
+      [messages(:messages_001),           '<a href="/boards/1/topics/1">First post</a>'],
+      [news(:news_001),                   '<a href="/news/1">eCookbook first release !</a>'],
+      [projects(:projects_001),           '<a href="/projects/ecookbook">eCookbook</a>'],
+      [users(:users_001),                 '<a class="user active" href="/users/1">Redmine Admin</a>'],
+      [versions(:versions_001),           '<a title="07/01/2006" href="/versions/1">eCookbook - 0.1</a>'],
+      [wiki_pages(:wiki_pages_001),       '<a href="/projects/ecookbook/wiki/CookBook_documentation">CookBook documentation</a>']
+    ].each do |record, link|
+      assert_equal link, link_to_record(record)
+    end
+  end
+
+  def test_link_to_attachment_container
+    field = ProjectCustomField.generate!(:name => "File", :field_format => 'attachment')
+    project = projects(:projects_001)
+    project_custom_value_attachment = new_record(Attachment) do
+      project.custom_field_values = {field.id => {:file => mock_file}}
+      project.save
+    end
+
+    news_attachment = attachments(:attachments_004)
+    news_attachment.container = news(:news_001)
+    news_attachment.save!
+
+    [
+      [project_custom_value_attachment, '<a href="/projects/ecookbook">eCookbook</a>'],
+      [attachments(:attachments_002),   '<a href="/documents/1">Test document</a>'],
+      [attachments(:attachments_001),   link_to_issue(issues(:issues_003), :subject => false)],
+      [attachments(:attachments_013),   '<a href="/boards/1/topics/1">First post</a>'],
+      [news_attachment,                 '<a href="/news/1">eCookbook first release !</a>'],
+      [attachments(:attachments_008),   '<a href="/projects/ecookbook/files">Files</a>'],
+      [attachments(:attachments_009),   '<a href="/projects/ecookbook/files">Files</a>'],
+      [attachments(:attachments_003),   '<a href="/projects/ecookbook/wiki/Page_with_an_inline_image">Page with an inline image</a>'],
+    ].each do |attachment, link|
+      assert_equal link, link_to_attachment_container(attachment.container)
+    end
+  end
+
+  def test_principals_check_box_tag_with_avatar
+    principals = [User.find(1), Group.find(10)]
+    with_settings :gravatar_enabled => '1' do
+      tags = principals_check_box_tags("watcher[user_ids][]", principals)
+      principals.each do |principal|
+        assert_include avatar(principal, :size => 16), tags
+        assert_not_include content_tag('span', nil, :class => "name icon icon-#{principal.class.name.downcase}"), tags
+      end
+    end
+  end
+
+  def test_principals_check_box_tag_without_avatar
+    principals = [User.find(1), Group.find(10)]
+    Setting.gravatar_enabled = '1'
+    avatar_tags = principals.collect{|p| avatar(p, :size => 16)}
+
+    with_settings :gravatar_enabled => '0' do
+      tags = principals_check_box_tags(name, principals)
+      principals.each_with_index do |principal, i|
+        assert_not_include avatar_tags[i], tags
+        assert_include content_tag('span', nil, :class => "name icon icon-#{principal.class.name.downcase}"), tags
+      end
+    end
+  end
+
   def test_principals_options_for_select_with_users
     User.current = nil
     users = [User.find(2), User.find(4)]
-    assert_equal %(<option value="2">John Smith</option><option value="4">Robert Hill</option>),
-      principals_options_for_select(users)
+    assert_equal(
+      %(<option value="2">John Smith</option><option value="4">Robert Hill</option>),
+      principals_options_for_select(users))
   end
 
   def test_principals_options_for_select_with_selected
     User.current = nil
     users = [User.find(2), User.find(4)]
-    assert_equal %(<option value="2">John Smith</option><option value="4" selected="selected">Robert Hill</option>),
-      principals_options_for_select(users, User.find(4))
+    assert_equal(
+      %(<option value="2">John Smith</option><option value="4" selected="selected">Robert Hill</option>),
+      principals_options_for_select(users, User.find(4)))
   end
 
   def test_principals_options_for_select_with_users_and_groups
     User.current = nil
     set_language_if_valid 'en'
     users = [User.find(2), Group.find(11), User.find(4), Group.find(10)]
-    assert_equal %(<option value="2">John Smith</option><option value="4">Robert Hill</option>) +
+    assert_equal(
+      %(<option value="2">John Smith</option><option value="4">Robert Hill</option>) +
       %(<optgroup label="Groups"><option value="10">A Team</option><option value="11">B Team</option></optgroup>),
-      principals_options_for_select(users)
+      principals_options_for_select(users))
   end
 
   def test_principals_options_for_select_with_empty_collection
@@ -1549,15 +1878,10 @@ RAW
   end
 
   def test_truncate_single_line_non_ascii
-    ja = "\xe6\x97\xa5\xe6\x9c\xac\xe8\xaa\x9e".force_encoding('UTF-8')
+    ja = '日本語'
     result = truncate_single_line_raw("#{ja}\n#{ja}\n#{ja}", 10)
     assert_equal "#{ja} #{ja}...", result
     assert !result.html_safe?
-  end
-
-  def test_back_url_should_remove_utf8_checkmark_from_referer
-    stubs(:request).returns(stub(:env => {'HTTP_REFERER' => "/path?utf8=\u2713&foo=bar"}))
-    assert_equal "/path?foo=bar", back_url
   end
 
   def test_hours_formatting
@@ -1578,5 +1902,70 @@ RAW
   def test_html_hours
     assert_equal '<span class="hours hours-int">0</span><span class="hours hours-dec">:45</span>', html_hours('0:45')
     assert_equal '<span class="hours hours-int">0</span><span class="hours hours-dec">.75</span>', html_hours('0.75')
+  end
+
+  def test_form_for_includes_name_attribute
+    assert_match(/name="new_issue-[a-z0-9]{8}"/, form_for(Issue.new){})
+  end
+
+  def test_labelled_form_for_includes_name_attribute
+    assert_match(/name="new_issue-[a-z0-9]{8}"/, labelled_form_for(Issue.new){})
+  end
+
+  def test_redner_if_exist_should_be_render_partial
+    controller.prepend_view_path "test/fixtures/views"
+    assert_equal "partial html\n", render_if_exist(:partial => 'partial')
+  end
+
+  def test_redner_if_exist_should_be_render_nil
+    controller.prepend_view_path "test/fixtures/views"
+    assert_nil render_if_exist(:partial => 'non_exist_partial')
+  end
+
+  def test_export_csv_encoding_select_tag_should_return_nil_when_general_csv_encoding_is_UTF8
+    with_locale 'az' do
+      assert_equal l(:general_csv_encoding), 'UTF-8'
+      assert_nil export_csv_encoding_select_tag
+    end
+  end
+
+  def test_export_csv_encoding_select_tag_should_have_two_option_when_general_csv_encoding_is_not_UTF8
+    with_locale 'en' do
+      assert_not_equal l(:general_csv_encoding), 'UTF-8'
+      result = export_csv_encoding_select_tag
+      assert_select_in result, "option[selected='selected'][value=#{l(:general_csv_encoding)}]", :text => l(:general_csv_encoding)
+      assert_select_in result, "option[value='UTF-8']", :text => 'UTF-8'
+    end
+  end
+
+  private
+
+  def wiki_links_with_special_characters
+    return {
+      '[[Jack & Coke]]' =>
+          link_to("Jack & Coke",
+                  "/projects/ecookbook/wiki/Jack_&_Coke",
+                  :class => "wiki-page new"),
+      '[[a "quoted" name]]' =>
+          link_to("a \"quoted\" name",
+                  "/projects/ecookbook/wiki/A_%22quoted%22_name",
+                  :class => "wiki-page new"),
+      '[[le français, c\'est super]]' =>
+          link_to("le français, c\'est super",
+                  "/projects/ecookbook/wiki/Le_fran%C3%A7ais_c'est_super",
+                  :class => "wiki-page new"),
+      '[[broken < less]]' =>
+          link_to("broken < less",
+                  "/projects/ecookbook/wiki/Broken_%3C_less",
+                  :class => "wiki-page new"),
+      '[[broken > more]]' =>
+          link_to("broken > more",
+                  "/projects/ecookbook/wiki/Broken_%3E_more",
+                  :class => "wiki-page new"),
+      '[[[foo]Including [square brackets] in wiki title]]' =>
+          link_to("[foo]Including [square brackets] in wiki title",
+                  "/projects/ecookbook/wiki/%5Bfoo%5DIncluding_%5Bsquare_brackets%5D_in_wiki_title",
+                  :class => "wiki-page new"),
+    }
   end
 end

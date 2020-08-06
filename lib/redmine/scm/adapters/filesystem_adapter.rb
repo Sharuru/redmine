@@ -1,5 +1,7 @@
+# frozen_string_literal: true
+
 # Redmine - project management software
-# Copyright (C) 2006-2017  Jean-Philippe Lang
+# Copyright (C) 2006-2020  Jean-Philippe Lang
 #
 # FileSystem adapter
 # File written by Paul Rivier, at Demotera.
@@ -65,6 +67,7 @@ module Redmine
           Dir.new(trgt).each do |e1|
             e_utf8 = scm_iconv('UTF-8', @path_encoding, e1)
             next if e_utf8.blank?
+
             relative_path_utf8 = format_path_ends(
                 (format_path_ends(path,false,true) + e_utf8),false,false)
             t1_utf8 = target(relative_path_utf8)
@@ -81,7 +84,7 @@ module Redmine
                           # below : list unreadable files, but dont link them.
                           :path => utf_8_path,
                           :kind => (File.directory?(t1) ? 'dir' : 'file'),
-                          :size => (File.directory?(t1) ? nil : [File.size(t1)].pack('l').unpack('L').first),
+                          :size => (File.directory?(t1) ? nil : File.size(t1)),
                           :lastrev =>
                               Revision.new({:time => (File.mtime(t1)) })
                         })
@@ -107,9 +110,10 @@ module Redmine
         # Here we do not shell-out, so we do not want quotes.
         def target(path=nil)
           # Prevent the use of ..
-          if path and !path.match(/(^|\/)\.\.(\/|$)/)
+          if path and !/(^|\/)\.\.(\/|$)/.match?(path)
             return "#{self.url}#{without_leading_slash(path)}"
           end
+
           return self.url
         end
       end

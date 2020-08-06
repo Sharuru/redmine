@@ -1,5 +1,7 @@
+# frozen_string_literal: true
+
 # Redmine - project management software
-# Copyright (C) 2006-2017  Jean-Philippe Lang
+# Copyright (C) 2006-2020  Jean-Philippe Lang
 #
 # This program is free software; you can redistribute it and/or
 # modify it under the terms of the GNU General Public License
@@ -22,7 +24,8 @@ class Redmine::VersionFieldFormatTest < ActionView::TestCase
   fixtures :projects, :versions, :trackers,
            :roles, :users, :members, :member_roles,
            :issue_statuses, :issue_categories, :issue_relations, :workflows,
-           :enumerations
+           :enumerations, :custom_fields, :custom_fields_trackers,
+           :enabled_modules
 
   def setup
     super
@@ -49,6 +52,20 @@ class Redmine::VersionFieldFormatTest < ActionView::TestCase
     assert issue.valid?
   end
 
+  def test_not_existing_values_should_be_invalid
+    field = IssueCustomField.create!(:name => 'Foo', :field_format => 'version', :is_for_all => true, :trackers => Tracker.all)
+    project = Project.generate!
+    version = Version.generate!(:project => project, :status => 'closed')
+
+    field.version_status = ["open"]
+    field.save!
+
+    issue = Issue.new(:project_id => project.id, :tracker_id => 1, :custom_field_values => {field.id => version.id})
+    assert_not_include [version.name, version.id.to_s], field.possible_custom_value_options(issue.custom_value_for(field))
+    assert_equal false, issue.valid?
+    assert_include "Foo #{::I18n.t('activerecord.errors.messages.inclusion')}", issue.errors.full_messages.first
+  end
+
   def test_possible_values_options_should_return_project_versions
     field = IssueCustomField.new(:field_format => 'version')
     project = Project.find(1)
@@ -56,7 +73,7 @@ class Redmine::VersionFieldFormatTest < ActionView::TestCase
 
     assert_equal expected, field.possible_values_options(project).map(&:first)
   end
- 
+
   def test_possible_values_options_should_return_system_shared_versions_without_project
     field = IssueCustomField.new(:field_format => 'version')
     version = Version.generate!(:project => Project.find(1), :status => 'open', :sharing => 'system')
@@ -99,7 +116,9 @@ class Redmine::VersionFieldFormatTest < ActionView::TestCase
     query = Query.new(:project => project)
 
     full_name = "#{version.project} - #{version.name}"
-    assert_include [full_name, version.id.to_s, l(:version_status_locked)],
+    assert_include(
+      [full_name, version.id.to_s, l(:version_status_locked)],
       field.query_filter_options(query)[:values].call
+    )
   end
 end

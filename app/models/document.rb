@@ -1,5 +1,7 @@
+# frozen_string_literal: true
+
 # Redmine - project management software
-# Copyright (C) 2006-2017  Jean-Philippe Lang
+# Copyright (C) 2006-2020  Jean-Philippe Lang
 #
 # This program is free software; you can redistribute it and/or
 # modify it under the terms of the GNU General Public License
@@ -32,7 +34,7 @@ class Document < ActiveRecord::Base
   validates_presence_of :project, :title, :category
   validates_length_of :title, :maximum => 255
 
-  after_create :send_notification
+  after_create_commit :send_notification
 
   scope :visible, lambda {|*args|
     joins(:project).
@@ -68,7 +70,7 @@ class Document < ActiveRecord::Base
 
   def send_notification
     if Setting.notified_events.include?('document_added')
-      Mailer.document_added(self).deliver
+      Mailer.deliver_document_added(self, User.current)
     end
   end
 end

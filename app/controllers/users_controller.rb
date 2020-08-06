@@ -1,5 +1,7 @@
+# frozen_string_literal: true
+
 # Redmine - project management software
-# Copyright (C) 2006-2017  Jean-Philippe Lang
+# Copyright (C) 2006-2020  Jean-Philippe Lang
 #
 # This program is free software; you can redistribute it and/or
 # modify it under the terms of the GNU General Public License
@@ -28,7 +30,10 @@ class UsersController < ApplicationController
   include SortHelper
   helper :custom_fields
   include CustomFieldsHelper
+  include UsersHelper
   helper :principal_memberships
+  helper :activities
+  include ActivitiesHelper
 
   require_sudo_mode :create, :update, :destroy
 
@@ -59,6 +64,9 @@ class UsersController < ApplicationController
         @groups = Group.givable.sort
         render :layout => !request.xhr?
       }
+      format.csv {
+        send_data(users_to_csv(scope.order(sort_clause)), :type => 'text/csv; header=present', :filename => 'users.csv')
+      }
       format.api
     end
   end
@@ -71,6 +79,16 @@ class UsersController < ApplicationController
 
     # show projects based on current user visibility
     @memberships = @user.memberships.preload(:roles, :project).where(Project.visible_condition(User.current)).to_a
+
+    @issue_counts = {}
+    @issue_counts[:assigned] = {
+      :total  => Issue.visible.assigned_to(@user).count,
+      :open   => Issue.visible.open.assigned_to(@user).count
+    }
+    @issue_counts[:reported] = {
+      :total  => Issue.visible.where(:author_id => @user.id).count,
+      :open   => Issue.visible.open.where(:author_id => @user.id).count
+    }
 
     respond_to do |format|
       format.html {
@@ -95,7 +113,7 @@ class UsersController < ApplicationController
     @user.pref.safe_attributes = params[:pref]
 
     if @user.save
-      Mailer.account_information(@user, @user.password).deliver if params[:send_information]
+      Mailer.deliver_account_information(@user, @user.password) if params[:send_information]
 
       respond_to do |format|
         format.html {
@@ -140,9 +158,9 @@ class UsersController < ApplicationController
       @user.pref.save
 
       if was_activated
-        Mailer.account_activated(@user).deliver
+        Mailer.deliver_account_activated(@user)
       elsif @user.active? && params[:send_information] && @user != User.current
-        Mailer.account_information(@user, @user.password).deliver
+        Mailer.deliver_account_information(@user, @user.password)
       end
 
       respond_to do |format|

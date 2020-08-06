@@ -40,6 +40,15 @@ jsToolBar.prototype.elements.em = {
   }
 }
 
+// ins
+jsToolBar.prototype.elements.ins = {
+  type: 'button',
+  title: 'Underline',
+  fn: {
+    wiki: function() { this.singleTag('_') }
+  }
+}
+
 // del
 jsToolBar.prototype.elements.del = {
   type: 'button',
@@ -161,12 +170,30 @@ jsToolBar.prototype.elements.unbq = {
   }
 }
 
+// table
+jsToolBar.prototype.elements.table = {
+  type: 'button',
+  title: 'Table',
+  fn: {
+    wiki: function() {
+      var This = this;
+      this.tableMenu(function(cols, rowCount){
+        This.encloseLineSelection(
+          '|'+cols.join(' |')+' |\n' +                                   // header
+          Array(cols.length+1).join('|--')+'|\n' +                       // second line
+          Array(rowCount+1).join(Array(cols.length+1).join('|  ')+'|\n') // cells
+        );
+      });
+    }
+  }
+}
+
 // pre
 jsToolBar.prototype.elements.pre = {
   type: 'button',
   title: 'Preformatted text',
   fn: {
-    wiki: function() { this.encloseLineSelection('~~~\n', '\n~~~') }
+    wiki: function() { this.encloseLineSelection('```\n', '\n```') }
   }
 }
 
@@ -178,7 +205,7 @@ jsToolBar.prototype.elements.precode = {
     wiki: function() {
       var This = this;
       this.precodeMenu(function(lang){
-        This.encloseLineSelection('~~~ ' + lang + '\n', '\n~~~\n');
+        This.encloseLineSelection('``` ' + lang + '\n', '\n```\n');
       });
     }
   }

@@ -1,5 +1,7 @@
+# frozen_string_literal: true
+
 # Redmine - project management software
-# Copyright (C) 2006-2017  Jean-Philippe Lang
+# Copyright (C) 2006-2020  Jean-Philippe Lang
 #
 # This program is free software; you can redistribute it and/or
 # modify it under the terms of the GNU General Public License
@@ -26,7 +28,6 @@ class RepositoriesBazaarControllerTest < Redmine::RepositoryControllerTest
   REPOSITORY_PATH = Rails.root.join('tmp/test/bazaar_repository').to_s
   REPOSITORY_PATH_TRUNK = File.join(REPOSITORY_PATH, "trunk")
   PRJ_ID = 3
-  CHAR_1_UTF8_HEX   = "\xc3\x9c".dup.force_encoding('UTF-8')
 
   def setup
     super
@@ -68,6 +69,7 @@ class RepositoriesBazaarControllerTest < Redmine::RepositoryControllerTest
     def test_browse_directory
       get :show, :params => {
           :id => PRJ_ID,
+          :repository_id => @repository.id,
           :path => repository_path_hash(['directory'])[:param]
         }
       assert_response :success
@@ -82,6 +84,7 @@ class RepositoriesBazaarControllerTest < Redmine::RepositoryControllerTest
     def test_browse_at_given_revision
       get :show, :params => {
           :id => PRJ_ID,
+          :repository_id => @repository.id,
           :path => repository_path_hash([])[:param],
           :rev => 3
         }
@@ -98,6 +101,7 @@ class RepositoriesBazaarControllerTest < Redmine::RepositoryControllerTest
     def test_changes
       get :changes, :params => {
           :id => PRJ_ID,
+          :repository_id => @repository.id,
           :path => repository_path_hash(['doc-mkdir.txt'])[:param]
         }
       assert_response :success
@@ -107,6 +111,7 @@ class RepositoriesBazaarControllerTest < Redmine::RepositoryControllerTest
     def test_entry_show
       get :entry, :params => {
           :id => PRJ_ID,
+          :repository_id => @repository.id,
           :path => repository_path_hash(['directory', 'doc-ls.txt'])[:param]
         }
       assert_response :success
@@ -117,6 +122,7 @@ class RepositoriesBazaarControllerTest < Redmine::RepositoryControllerTest
     def test_entry_download
       get :entry, :params => {
           :id => PRJ_ID,
+          :repository_id => @repository.id,
           :path => repository_path_hash(['directory', 'doc-ls.txt'])[:param],
           :format => 'raw'
         }
@@ -128,6 +134,7 @@ class RepositoriesBazaarControllerTest < Redmine::RepositoryControllerTest
     def test_directory_entry
       get :entry, :params => {
           :id => PRJ_ID,
+          :repository_id => @repository.id,
           :path => repository_path_hash(['directory'])[:param]
         }
       assert_response :success
@@ -139,6 +146,7 @@ class RepositoriesBazaarControllerTest < Redmine::RepositoryControllerTest
       ['inline', 'sbs'].each do |dt|
         get :diff, :params => {
             :id => PRJ_ID,
+            :repository_id => @repository.id,
             :rev => 3,
             :type => dt
           }
@@ -151,6 +159,7 @@ class RepositoriesBazaarControllerTest < Redmine::RepositoryControllerTest
     def test_annotate
       get :annotate, :params => {
           :id => PRJ_ID,
+          :repository_id => @repository.id,
           :path => repository_path_hash(['doc-mkdir.txt'])[:param]
         }
       assert_response :success
@@ -214,7 +223,7 @@ class RepositoriesBazaarControllerTest < Redmine::RepositoryControllerTest
         assert_select "th.line-num", :text => '1' do
           assert_select "+ td.revision" do
             assert_select "a", :text => '2'
-            assert_select "+ td.author", :text => "test #{CHAR_1_UTF8_HEX}" do
+            assert_select "+ td.author", :text => "test Ü" do
               assert_select "+ td",
                             :text => "author non ASCII test"
             end

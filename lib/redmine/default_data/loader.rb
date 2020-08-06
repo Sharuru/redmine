@@ -1,5 +1,7 @@
+# frozen_string_literal: true
+
 # Redmine - project management software
-# Copyright (C) 2006-2017  Jean-Philippe Lang
+# Copyright (C) 2006-2020  Jean-Philippe Lang
 #
 # This program is free software; you can redistribute it and/or
 # modify it under the terms of the GNU General Public License
@@ -17,7 +19,7 @@
 
 module Redmine
   module DefaultData
-    class DataAlreadyLoaded < Exception; end
+    class DataAlreadyLoaded < StandardError; end
 
     module Loader
       include Redmine::I18n
@@ -29,7 +31,8 @@ module Redmine
           !Role.where(:builtin => 0).exists? &&
             !Tracker.exists? &&
             !IssueStatus.exists? &&
-            !Enumeration.exists?
+            !Enumeration.exists? &&
+            !Query.exists?
         end
 
         # Loads the default data
@@ -48,9 +51,10 @@ module Redmine
             manager.permissions = manager.setable_permissions.collect {|p| p.name}
             manager.save!
 
-            developer = Role.create!  :name => l(:default_role_developer),
-                                      :position => 2,
-                                      :permissions => [:manage_versions,
+            developer = Role.create!(
+                                     :name => l(:default_role_developer),
+                                     :position => 2,
+                                     :permissions => [:manage_versions,
                                                       :manage_categories,
                                                       :view_issues,
                                                       :add_issues,
@@ -80,11 +84,11 @@ module Redmine
                                                       :browse_repository,
                                                       :view_changesets,
                                                       :commit_access,
-                                                      :manage_related_issues]
-
-            reporter = Role.create! :name => l(:default_role_reporter),
-                                    :position => 3,
-                                    :permissions => [:view_issues,
+                                                      :manage_related_issues])
+            reporter = Role.create!(
+                                   :name => l(:default_role_reporter),
+                                   :position => 3,
+                                   :permissions => [:view_issues,
                                                     :add_issues,
                                                     :add_issue_notes,
                                                     :save_queries,
@@ -102,7 +106,7 @@ module Redmine
                                                     :edit_own_messages,
                                                     :view_files,
                                                     :browse_repository,
-                                                    :view_changesets]
+                                                    :view_changesets])
 
             Role.non_member.update_attribute :permissions, [:view_issues,
                                                             :add_issues,
@@ -188,6 +192,85 @@ module Redmine
 
             TimeEntryActivity.create!(:name => l(:default_activity_design), :position => 1)
             TimeEntryActivity.create!(:name => l(:default_activity_development), :position => 2)
+
+            # Issue queries
+            IssueQuery.create!(
+              :name => l(:label_assigned_to_me_issues),
+              :filters =>
+                {
+                  'status_id' => {:operator => 'o', :values => ['']},
+                  'assigned_to_id' => {:operator => '=', :values => ['me']},
+                  'project.status' => {:operator => '=', :values => ['1']}
+                },
+              :sort_criteria => [['priority', 'desc'], ['updated_on', 'desc']],
+              :visibility => Query::VISIBILITY_PUBLIC
+            )
+            IssueQuery.create!(
+              :name => l(:label_reported_issues),
+              :filters =>
+                {
+                  'status_id' => {:operator => 'o', :values => ['']},
+                  'author_id' => {:operator => '=', :values => ['me']},
+                  'project.status' => {:operator => '=', :values => ['1']}
+                },
+              :sort_criteria => [['updated_on', 'desc']],
+              :visibility => Query::VISIBILITY_PUBLIC
+            )
+            IssueQuery.create!(
+              :name => l(:label_updated_issues),
+              :filters =>
+                {
+                  'status_id' => {:operator => 'o', :values => ['']},
+                  'updated_by' => {:operator => '=', :values => ['me']},
+                  'project.status' => {:operator => '=', :values => ['1']}
+                },
+              :sort_criteria => [['updated_on', 'desc']],
+              :visibility => Query::VISIBILITY_PUBLIC
+            )
+            IssueQuery.create!(
+              :name => l(:label_watched_issues),
+              :filters =>
+                {
+                  'status_id' => {:operator => 'o', :values => ['']},
+                  'watcher_id' => {:operator => '=', :values => ['me']},
+                  'project.status' => {:operator => '=', :values => ['1']},
+                },
+              :sort_criteria => [['updated_on', 'desc']],
+              :visibility => Query::VISIBILITY_PUBLIC
+            )
+
+            # Project queries
+            ProjectQuery.create!(
+              :name => l(:label_my_projects),
+              :filters =>
+                {
+                  'status' => {:operator => '=', :values => ['1']},
+                  'id' => {:operator => '=', :values => ['mine']}
+                },
+              :visibility => Query::VISIBILITY_PUBLIC
+            )
+            ProjectQuery.create!(
+              :name => l(:label_my_bookmarks),
+              :filters =>
+                {
+                  'status' => {:operator => '=', :values => ['1']},
+                  'id' => {:operator => '=', :values => ['bookmarks']}
+                },
+              :visibility => Query::VISIBILITY_PUBLIC
+            )
+
+            # Time entry queries
+            TimeEntryQuery.create!(
+              :name => l(:label_spent_time),
+              :filters =>
+                {
+                  'spent_on' => {:operator => '*', :values => ['']},
+                  'user_id' => {:operator => '=', :values => ['me']}
+                },
+              :sort_criteria => [['spent_on', 'desc']],
+              :options => {:totalable_names => [:hours]},
+              :visibility => Query::VISIBILITY_PUBLIC
+            )
           end
           true
         end

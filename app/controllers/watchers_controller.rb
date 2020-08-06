@@ -1,5 +1,7 @@
+# frozen_string_literal: true
+
 # Redmine - project management software
-# Copyright (C) 2006-2017  Jean-Philippe Lang
+# Copyright (C) 2006-2020  Jean-Philippe Lang
 #
 # This program is free software; you can redistribute it and/or
 # modify it under the terms of the GNU General Public License
@@ -40,7 +42,8 @@ class WatchersController < ApplicationController
     else
       user_ids << params[:user_id]
     end
-    users = User.active.visible.where(:id => user_ids.flatten.compact.uniq)
+    user_ids = user_ids.flatten.compact.uniq
+    users = Principal.assignable_watchers.where(:id => user_ids).to_a
     users.each do |user|
       @watchables.each do |watchable|
         Watcher.create(:watchable => watchable, :user => user)
@@ -56,7 +59,7 @@ class WatchersController < ApplicationController
   def append
     if params[:watcher]
       user_ids = params[:watcher][:user_ids] || [params[:watcher][:user_id]]
-      @users = User.active.visible.where(:id => user_ids).to_a
+      @users = Principal.assignable_watchers.where(:id => user_ids).to_a
     end
     if @users.blank?
       head 200
@@ -64,7 +67,7 @@ class WatchersController < ApplicationController
   end
 
   def destroy
-    user = User.find(params[:user_id])
+    user = Principal.find(params[:user_id])
     @watchables.each do |watchable|
       watchable.set_watcher(user, false)
     end
@@ -86,7 +89,7 @@ class WatchersController < ApplicationController
 
   def find_project
     if params[:object_type] && params[:object_id]
-      @watchables = find_objets_from_params
+      @watchables = find_objects_from_params
       @projects = @watchables.map(&:project).uniq
       if @projects.size == 1
         @project = @projects.first
@@ -97,7 +100,7 @@ class WatchersController < ApplicationController
   end
 
   def find_watchables
-    @watchables = find_objets_from_params
+    @watchables = find_objects_from_params
     unless @watchables.present?
       render_404
     end
@@ -119,19 +122,24 @@ class WatchersController < ApplicationController
   def users_for_new_watcher
     scope = nil
     if params[:q].blank? && @project.present?
-      scope = @project.users
+      scope = @project.principals.assignable_watchers
     else
-      scope = User.all.limit(100)
+      scope = Principal.assignable_watchers.limit(100)
     end
-    users = scope.active.visible.sorted.like(params[:q]).to_a
+    users = scope.sorted.like(params[:q]).to_a
     if @watchables && @watchables.size == 1
       users -= @watchables.first.watcher_users
     end
     users
   end
 
-  def find_objets_from_params
-    klass = Object.const_get(params[:object_type].camelcase) rescue nil
+  def find_objects_from_params
+    klass =
+      begin
+        Object.const_get(params[:object_type].camelcase)
+      rescue
+        nil
+      end
     return unless klass && klass.respond_to?('watched_by')
 
     scope = klass.where(:id => Array.wrap(params[:object_id]))

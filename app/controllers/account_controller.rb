@@ -1,5 +1,7 @@
+# frozen_string_literal: true
+
 # Redmine - project management software
-# Copyright (C) 2006-2017  Jean-Philippe Lang
+# Copyright (C) 2006-2020  Jean-Philippe Lang
 #
 # This program is free software; you can redistribute it and/or
 # modify it under the terms of the GNU General Public License
@@ -62,8 +64,14 @@ class AccountController < ApplicationController
     (redirect_to(home_url); return) unless Setting.lost_password?
     if prt = (params[:token] || session[:password_recovery_token])
       @token = Token.find_token("recovery", prt.to_s)
-      if @token.nil? || @token.expired?
+      if @token.nil?
         redirect_to home_url
+        return
+      elsif @token.expired?
+        # remove expired token from session and let user try again
+        session[:password_recovery_token] = nil
+        flash[:error] = l(:error_token_expired)
+        redirect_to lost_password_url
         return
       end
 
@@ -87,7 +95,7 @@ class AccountController < ApplicationController
           @user.must_change_passwd = false
           if @user.save
             @token.destroy
-            Mailer.password_updated(@user)
+            Mailer.deliver_password_updated(@user, User.current)
             flash[:notice] = l(:notice_account_password_updated)
             redirect_to signin_path
             return
@@ -98,7 +106,7 @@ class AccountController < ApplicationController
       return
     else
       if request.post?
-        email = params[:mail].to_s
+        email = params[:mail].to_s.strip
         user = User.find_by_mail(email)
         # user not found
         unless user
@@ -119,7 +127,7 @@ class AccountController < ApplicationController
         if token.save
           # Don't use the param to send the email
           recipent = user.mails.detect {|e| email.casecmp(e) == 0} || user.mail
-          Mailer.lost_password(token, recipent).deliver
+          Mailer.deliver_lost_password(user, token, recipent)
           flash[:notice] = l(:notice_account_lost_email_sent)
           redirect_to signin_path
           return
@@ -212,7 +220,7 @@ class AccountController < ApplicationController
     if user.nil?
       invalid_credentials
     elsif user.new_record?
-      onthefly_creation_failed(user, {:login => user.login, :auth_source_id => user.auth_source_id })
+      onthefly_creation_failed(user, {:login => user.login, :auth_source_id => user.auth_source_id})
     else
       # Valid user
       if user.active?
@@ -275,7 +283,7 @@ class AccountController < ApplicationController
     if params[:autologin] && Setting.autologin?
       set_autologin_cookie(user)
     end
-    call_hook(:controller_account_success_authentication_after, {:user => user })
+    call_hook(:controller_account_success_authentication_after, {:user => user})
     redirect_back_or_default my_page_path
   end
 
@@ -296,7 +304,7 @@ class AccountController < ApplicationController
   end
 
   # Onthefly creation failed, display the registration form to fill/fix attributes
-  def onthefly_creation_failed(user, auth_source_options = { })
+  def onthefly_creation_failed(user, auth_source_options = {})
     @user = user
     session[:auth_source_registration] = auth_source_options unless auth_source_options.empty?
     render :action => 'register'
@@ -313,7 +321,7 @@ class AccountController < ApplicationController
   def register_by_email_activation(user, &block)
     token = Token.new(:user => user, :action => "register")
     if user.save and token.save
-      Mailer.register(token).deliver
+      Mailer.deliver_register(user, token)
       flash[:notice] = l(:notice_account_register_done, :email => ERB::Util.h(user.mail))
       redirect_to signin_path
     else
@@ -343,7 +351,7 @@ class AccountController < ApplicationController
   def register_manually_by_administrator(user, &block)
     if user.save
       # Sends an email to the administrators
-      Mailer.account_activation_request(user).deliver
+      Mailer.deliver_account_activation_request(user)
       account_pending(user)
     else
       yield if block_given?

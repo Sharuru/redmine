@@ -5,6 +5,7 @@ syntax: glob
 .loadpath
 .powrc
 .rvmrc
+.ruby-version
 config/additional_environment.rb
 config/configuration.yml
 config/database.yml
@@ -40,3 +41,5 @@ vendor/cache
 Gemfile.lock
 Gemfile.local
 
+node_modules
+yarn-error.log

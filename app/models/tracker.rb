@@ -1,5 +1,7 @@
+# frozen_string_literal: true
+
 # Redmine - project management software
-# Copyright (C) 2006-2017  Jean-Philippe Lang
+# Copyright (C) 2006-2020  Jean-Philippe Lang
 #
 # This program is free software; you can redistribute it and/or
 # modify it under the terms of the GNU General Public License
@@ -36,6 +38,7 @@ class Tracker < ActiveRecord::Base
   validates_presence_of :name
   validates_uniqueness_of :name
   validates_length_of :name, :maximum => 30
+  validates_length_of :description, :maximum => 255
 
   scope :sorted, lambda { order(:position) }
   scope :named, lambda {|arg| where("LOWER(#{table_name}.name) = LOWER(?)", arg.to_s.strip)}
@@ -63,13 +66,15 @@ class Tracker < ActiveRecord::Base
     joins(:projects).where(condition).distinct
   }
 
-  safe_attributes 'name',
+  safe_attributes(
+    'name',
     'default_status_id',
     'is_in_roadmap',
     'core_fields',
     'position',
     'custom_field_ids',
-    'project_ids'
+    'project_ids',
+    'description')
 
   def to_s; name end
 
@@ -93,7 +98,7 @@ class Tracker < ActiveRecord::Base
 
   def disabled_core_fields
     i = -1
-    @disabled_core_fields ||= CORE_FIELDS.select { i += 1; (fields_bits || 0) & (2 ** i) != 0}
+    @disabled_core_fields ||= CORE_FIELDS.select { i += 1; (fields_bits || 0) & (1 << i) != 0}
   end
 
   def core_fields
@@ -106,7 +111,7 @@ class Tracker < ActiveRecord::Base
     bits = 0
     CORE_FIELDS.each_with_index do |field, i|
       unless fields.include?(field)
-        bits |= 2 ** i
+        bits |= 1 << i
       end
     end
     self.fields_bits = bits
@@ -136,8 +141,9 @@ class Tracker < ActiveRecord::Base
     end
   end
 
-private
+  private
+
   def check_integrity
-    raise Exception.new("Cannot delete tracker") if Issue.where(:tracker_id => self.id).any?
+    raise "Cannot delete tracker" if Issue.where(:tracker_id => self.id).any?
   end
 end

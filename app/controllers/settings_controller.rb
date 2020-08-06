@@ -1,5 +1,7 @@
+# frozen_string_literal: true
+
 # Redmine - project management software
-# Copyright (C) 2006-2017  Jean-Philippe Lang
+# Copyright (C) 2006-2020  Jean-Philippe Lang
 #
 # This program is free software; you can redistribute it and/or
 # modify it under the terms of the GNU General Public License
@@ -46,7 +48,7 @@ class SettingsController < ApplicationController
     end
 
     @options = {}
-    user_format = User::USER_FORMATS.collect{|key, value| [key, value[:setting_order]]}.sort{|a, b| a[1] <=> b[1]}
+    user_format = User::USER_FORMATS.collect{|key, value| [key, value[:setting_order]]}.sort_by{|f| f[1]}
     @options[:user_format] = user_format.collect{|f| [User.current.name(f[0]), f[0].to_s]}
     @deliveries = ActionMailer::Base.perform_deliveries
 

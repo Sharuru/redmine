@@ -1,5 +1,7 @@
+# frozen_string_literal: true
+
 # Redmine - project management software
-# Copyright (C) 2006-2017  Jean-Philippe Lang
+# Copyright (C) 2006-2020  Jean-Philippe Lang
 #
 # This program is free software; you can redistribute it and/or
 # modify it under the terms of the GNU General Public License
@@ -65,6 +67,36 @@ class EnumerationsControllerTest < Redmine::ControllerTest
     assert_redirected_to '/enumerations'
     e = IssuePriority.find_by_name('Lowest')
     assert_not_nil e
+  end
+
+  def test_create_with_custom_field_values
+    custom_field = TimeEntryActivityCustomField.generate!
+    assert_difference 'TimeEntryActivity.count' do
+      post :create, :params => {
+          :enumeration => {
+            :type => 'TimeEntryActivity',
+            :name => 'Sample',
+            :custom_field_values => {custom_field.id.to_s => "sample"}
+          }
+        }
+    end
+    assert_redirected_to '/enumerations'
+    assert_equal "sample", Enumeration.find_by(:name => 'Sample').custom_field_values.last.value
+  end
+
+  def test_create_with_multiple_select_list_custom_fields
+    custom_field = IssuePriorityCustomField.generate!(:field_format => 'list', :multiple => true, :possible_values => ['1', '2', '3', '4'])
+    assert_difference 'IssuePriority.count' do
+      post :create, :params => {
+          :enumeration => {
+            :type => 'IssuePriority',
+            :name => 'Sample',
+            :custom_field_values => {custom_field.id.to_s => ['1', '2']}
+          }
+        }
+    end
+    assert_redirected_to '/enumerations'
+    assert_equal ['1', '2'].sort, Enumeration.find_by(:name => 'Sample').custom_field_values.last.value.sort
   end
 
   def test_create_with_failure
@@ -134,6 +166,20 @@ class EnumerationsControllerTest < Redmine::ControllerTest
       }
     assert_response 302
     assert_equal 1, Enumeration.find(2).position
+  end
+
+  def test_update_custom_field_values
+    custom_field = TimeEntryActivityCustomField.generate!
+    enumeration = Enumeration.find(9)
+    assert_nil enumeration.custom_field_values.last.value
+    put :update, :params => {
+          :id => enumeration.id,
+          :enumeration => {
+            :custom_field_values => {custom_field.id.to_s => "sample"}
+        }
+      }
+    assert_response 302
+    assert_equal "sample", enumeration.reload.custom_field_values.last.value
   end
 
   def test_destroy_enumeration_not_in_use

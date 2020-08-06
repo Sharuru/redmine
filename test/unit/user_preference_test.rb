@@ -1,5 +1,7 @@
+# frozen_string_literal: true
+
 # Redmine - project management software
-# Copyright (C) 2006-2017  Jean-Philippe Lang
+# Copyright (C) 2006-2020  Jean-Philippe Lang
 #
 # This program is free software; you can redistribute it and/or
 # modify it under the terms of the GNU General Public License
@@ -19,6 +21,10 @@ require File.expand_path('../../test_helper', __FILE__)
 
 class UserPreferenceTest < ActiveSupport::TestCase
   fixtures :users, :user_preferences
+
+  def setup
+    User.current = nil
+  end
 
   def test_hide_mail_should_default_to_true
     preference = UserPreference.new
@@ -103,5 +109,12 @@ class UserPreferenceTest < ActiveSupport::TestCase
     up.remove_block 'news'
     up.save!
     assert_equal ['documents'], up.my_page_settings.keys
+  end
+
+  def test_toolbar_language_options_setter_should_remove_except_supported_languages
+    up = User.find(2).pref
+    # bar is not a supported language
+    up.toolbar_language_options = 'ruby,cpp,bar,c'
+    assert_equal 'ruby,cpp,c', up.toolbar_language_options
   end
 end

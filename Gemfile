@@ -1,27 +1,26 @@
 source 'https://rubygems.org'
 
-if Gem::Version.new(Bundler::VERSION) < Gem::Version.new('1.5.0')
-  abort "Redmine requires Bundler 1.5.0 or higher (you're using #{Bundler::VERSION}).\nPlease update with 'gem update bundler'."
-end
+ruby '>= 2.3.0', '< 2.7.0'
+gem 'bundler', '>= 1.12.0'
 
-gem "rails", "5.1.2"
-gem "coderay", "~> 1.1.1"
-gem "request_store", "1.0.5"
-gem "mime-types", "~> 3.0"
+gem 'rails', '5.2.4.2'
+gem 'sprockets', '~> 3.7.2' if RUBY_VERSION < '2.5'
+gem 'rouge', '~> 3.21.0'
+gem 'request_store', '~> 1.5.0'
+gem "mini_mime", "~> 1.0.1"
 gem "actionpack-xml_parser"
-gem "roadie-rails", "~> 1.2.1"
-gem "roadie", "~> 3.2.1"
+gem "roadie-rails", (RUBY_VERSION < "2.5" ? "~> 1.3.0" : "~> 2.1.0")
 gem "mimemagic"
-
-gem "nokogiri", "~> 1.8.0"
-gem "i18n", "~> 0.7.0"
-
-# Request at least rails-html-sanitizer 1.0.3 because of security advisories
-gem "rails-html-sanitizer", ">= 1.0.3"
+gem "mail", "~> 2.7.1"
+gem 'csv', (RUBY_VERSION < '2.5' ? ['>= 3.1.1', '<= 3.1.5'] : '~> 3.1.1')
+gem "nokogiri", "~> 1.10.0"
+gem 'i18n', '~> 1.8.2'
+gem "rbpdf", "~> 1.20.0"
+gem 'addressable'
+gem 'rubyzip', (RUBY_VERSION < '2.4' ? '~> 1.3.0' : '~> 2.3.0')
 
 # Windows does not include zoneinfo files, so bundle the tzinfo-data gem
 gem 'tzinfo-data', platforms: [:mingw, :x64_mingw, :mswin]
-gem "rbpdf", "~> 1.19.2"
 
 # Optional gem for LDAP authentication
 group :ldap do
@@ -30,20 +29,18 @@ end
 
 # Optional gem for OpenID authentication
 group :openid do
-  gem "ruby-openid", "~> 2.3.0", :require => "openid"
+  gem "ruby-openid", "~> 2.9.2", :require => "openid"
   gem "rack-openid"
 end
 
-platforms :mri, :mingw, :x64_mingw do
-  # Optional gem for exporting the gantt to a PNG file, not supported with jruby
-  group :rmagick do
-    gem "rmagick", ">= 2.14.0"
-  end
+# Optional gem for exporting the gantt to a PNG file
+group :minimagick do
+  gem 'mini_magick', '~> 4.10.1'
+end
 
-  # Optional Markdown support, not for JRuby
-  group :markdown do
-    gem "redcarpet", "~> 3.4.0"
-  end
+# Optional Markdown support, not for JRuby
+group :markdown do
+  gem "redcarpet", "~> 3.5.0"
 end
 
 # Include database gems for the adapters found in the database
@@ -58,14 +55,14 @@ if File.exist?(database_file)
     adapters.each do |adapter|
       case adapter
       when 'mysql2'
-        gem "mysql2", "~> 0.4.6", :platforms => [:mri, :mingw, :x64_mingw]
+        gem "mysql2", "~> 0.5.0", :platforms => [:mri, :mingw, :x64_mingw]
       when /postgresql/
-        gem "pg", "~> 0.18.1", :platforms => [:mri, :mingw, :x64_mingw]
+        gem "pg", "~> 1.2.2", :platforms => [:mri, :mingw, :x64_mingw]
       when /sqlite3/
-        gem "sqlite3", "~>1.3.12", :platforms => [:mri, :mingw, :x64_mingw]
+        gem "sqlite3", "~> 1.4.0", :platforms => [:mri, :mingw, :x64_mingw]
       when /sqlserver/
-        gem "tiny_tds", "~> 1.0.5", :platforms => [:mri, :mingw, :x64_mingw]
-        gem "activerecord-sqlserver-adapter", :platforms => [:mri, :mingw, :x64_mingw]
+        gem "tiny_tds", "~> 2.1.2", :platforms => [:mri, :mingw, :x64_mingw]
+        gem "activerecord-sqlserver-adapter", "~> 5.2.1", :platforms => [:mri, :mingw, :x64_mingw]
       else
         warn("Unknown database adapter `#{adapter}` found in config/database.yml, use Gemfile.local to load your own database gems")
       end
@@ -78,18 +75,22 @@ else
 end
 
 group :development do
-  gem "rdoc", "~> 4.3"
   gem "yard"
 end
 
 group :test do
   gem "rails-dom-testing"
-  gem "mocha"
-  gem "simplecov", "~> 0.14.1", :require => false
+  gem 'mocha', '>= 1.4.0'
+  gem 'simplecov', (RUBY_VERSION < '2.4' ? '~> 0.17.0' : '~> 0.18.5'), :require => false
+  gem "ffi", platforms: [:mingw, :x64_mingw, :mswin]
   # For running system tests
-  gem 'puma', '~> 3.7'
-  gem "capybara", '~> 2.13'
+  gem 'puma'
+  gem 'capybara', (RUBY_VERSION < '2.4' ? '~> 3.15.1' : '~> 3.31.0')
   gem "selenium-webdriver"
+  # RuboCop
+  gem 'rubocop', '~> 0.81.0'
+  gem 'rubocop-performance', '~> 1.5.0'
+  gem 'rubocop-rails', '~> 2.5.0'
 end
 
 local_gemfile = File.join(File.dirname(__FILE__), "Gemfile.local")

@@ -1,5 +1,7 @@
+# frozen_string_literal: true
+
 # Redmine - project management software
-# Copyright (C) 2006-2017  Jean-Philippe Lang
+# Copyright (C) 2006-2020  Jean-Philippe Lang
 #
 # This program is free software; you can redistribute it and/or
 # modify it under the terms of the GNU General Public License
@@ -22,9 +24,10 @@ class RepositorySubversionTest < ActiveSupport::TestCase
 
   include Redmine::I18n
 
-  NUM_REV = 11
+  NUM_REV = 12
 
   def setup
+    User.current = nil
     @project = Project.find(3)
     @repository = Repository::Subversion.create(:project => @project,
                     :url => self.class.subversion_repository_url)
@@ -95,7 +98,7 @@ class RepositorySubversionTest < ActiveSupport::TestCase
       @project.reload
 
       assert_equal NUM_REV, @repository.changesets.count
-      assert_equal 20, @repository.filechanges.count
+      assert_equal 21, @repository.filechanges.count
       assert_equal 'Initial import.', @repository.changesets.find_by_revision('1').comments
     end
 
@@ -135,11 +138,11 @@ class RepositorySubversionTest < ActiveSupport::TestCase
       # with limit
       changesets = @repository.latest_changesets('', nil, 2)
       assert_equal 2, changesets.size
-      assert_equal @repository.latest_changesets('', nil).slice(0,2), changesets
+      assert_equal @repository.latest_changesets('', nil).slice(0, 2), changesets
 
       # with path
       changesets = @repository.latest_changesets('subversion_test/folder', nil)
-      assert_equal ["10", "9", "7", "6", "5", "2"], changesets.collect(&:revision)
+      assert_equal ["12", "10", "9", "7", "6", "5", "2"], changesets.collect(&:revision)
 
       # with path and revision
       changesets = @repository.latest_changesets('subversion_test/folder', 8)
@@ -233,7 +236,7 @@ class RepositorySubversionTest < ActiveSupport::TestCase
 
     def test_log_encoding_ignore_setting
       with_settings :commit_logs_encoding => 'windows-1252' do
-        s2 = "\xc3\x82\xc2\x80".force_encoding('UTF-8')
+        s2 = "Â\u0080"
         c = Changeset.new(:repository => @repository,
                           :comments   => s2,
                           :revision   => '123',
@@ -275,7 +278,7 @@ class RepositorySubversionTest < ActiveSupport::TestCase
       @repository.fetch_changesets
       @project.reload
       assert_equal NUM_REV, @repository.changesets.count
-      changeset = @repository.find_changeset_by_name('11')
+      changeset = @repository.find_changeset_by_name(NUM_REV.to_s)
       assert_nil changeset.next
     end
   else

@@ -1,5 +1,7 @@
+# frozen_string_literal: true
+
 # Redmine - project management software
-# Copyright (C) 2006-2017  Jean-Philippe Lang
+# Copyright (C) 2006-2020  Jean-Philippe Lang
 #
 # This program is free software; you can redistribute it and/or
 # modify it under the terms of the GNU General Public License
@@ -338,6 +340,46 @@ class SearchControllerTest < Redmine::ControllerTest
     assert_response 404
   end
 
+  def test_search_should_include_closed_projects
+    @request.session[:user_id] = 1
+
+    project = Project.find(5)
+    project.close
+    project.save
+
+    # scope all
+    get :index, :params => {:q => 'Issue of a private subproject', :scope => 'all'}
+    assert_response :success
+
+    assert_select '#search-results' do
+      assert_select 'dt.issue', :text => /Bug #6/
+    end
+
+    # scope my_projects
+    get :index, :params => {:q => 'Issue of a private subproject', :scope => 'my_projects'}
+    assert_response :success
+
+    assert_select '#search-results' do
+      assert_select 'dt.issue', :text => /Bug #6/
+    end
+
+    # scope subprojects
+    get :index, :params => {:id => 1, :q => 'Issue of a private subproject', :scope => 'subprojects'}
+    assert_response :success
+
+    assert_select '#search-results' do
+      assert_select 'dt.issue', :text => /Bug #6/
+    end
+
+    # scope project
+    get :index, :params => {:id => 5, :q => 'Issue of a private subproject'}
+    assert_response :success
+
+    assert_select '#search-results' do
+      assert_select 'dt.issue', :text => /Bug #6/
+    end
+  end
+
   def test_quick_jump_to_issue
     # issue of a public project
     get :index, :params => {:q => "3"}
@@ -368,7 +410,7 @@ class SearchControllerTest < Redmine::ControllerTest
   end
 
   def test_results_should_be_escaped_once
-    assert Issue.find(1).update_attributes(:subject => '<subject> escaped_once', :description => '<description> escaped_once')
+    assert Issue.find(1).update(:subject => '<subject> escaped_once', :description => '<description> escaped_once')
     get :index, :params => {:q => 'escaped_once'}
     assert_response :success
     assert_select '#search-results' do
@@ -378,7 +420,7 @@ class SearchControllerTest < Redmine::ControllerTest
   end
 
   def test_keywords_should_be_highlighted
-    assert Issue.find(1).update_attributes(:subject => 'subject highlighted', :description => 'description highlighted')
+    assert Issue.find(1).update(:subject => 'subject highlighted', :description => 'description highlighted')
     get :index, :params => {:q => 'highlighted'}
     assert_response :success
     assert_select '#search-results' do

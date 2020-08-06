@@ -1,5 +1,7 @@
+# frozen_string_literal: true
+
 # Redmine - project management software
-# Copyright (C) 2006-2017  Jean-Philippe Lang
+# Copyright (C) 2006-2020  Jean-Philippe Lang
 #
 # This program is free software; you can redistribute it and/or
 # modify it under the terms of the GNU General Public License
@@ -24,6 +26,7 @@ class WikiContentTest < ActiveSupport::TestCase
            :wikis, :wiki_pages, :wiki_contents, :wiki_content_versions
 
   def setup
+    User.current = nil
     @wiki = Wiki.find(1)
     @page = @wiki.pages.first
   end
@@ -53,8 +56,10 @@ class WikiContentTest < ActiveSupport::TestCase
       assert page.save
     end
 
-    assert_equal 1, ActionMailer::Base.deliveries.size
-    assert_include 'wiki page has been added', mail_body(ActionMailer::Base.deliveries.last)
+    assert_equal 2, ActionMailer::Base.deliveries.size
+    ActionMailer::Base.deliveries.each do |mail|
+      assert_include 'wiki page has been added', mail_body(mail)
+    end
   end
 
   def test_update_should_be_versioned
@@ -100,8 +105,10 @@ class WikiContentTest < ActiveSupport::TestCase
       assert content.save
     end
 
-    assert_equal 1, ActionMailer::Base.deliveries.size
-    assert_include 'wiki page has been updated', mail_body(ActionMailer::Base.deliveries.last)
+    assert_equal 2, ActionMailer::Base.deliveries.size
+    ActionMailer::Base.deliveries.each do |mail|
+      assert_include 'wiki page has been updated', mail_body(mail)
+    end
   end
 
   def test_fetch_history

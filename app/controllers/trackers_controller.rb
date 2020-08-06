@@ -1,5 +1,7 @@
+# frozen_string_literal: true
+
 # Redmine - project management software
-# Copyright (C) 2006-2017  Jean-Philippe Lang
+# Copyright (C) 2006-2020  Jean-Philippe Lang
 #
 # This program is free software; you can redistribute it and/or
 # modify it under the terms of the GNU General Public License
@@ -32,7 +34,7 @@ class TrackersController < ApplicationController
   end
 
   def new
-    @tracker ||= Tracker.new
+    @tracker ||= Tracker.new(:default_status => IssueStatus.sorted.first)
     @tracker.safe_attributes = params[:tracker]
     @trackers = Tracker.sorted.to_a
     @projects = Project.all
@@ -106,6 +108,6 @@ class TrackersController < ApplicationController
       return
     end
     @trackers = Tracker.sorted.to_a
-    @custom_fields = IssueCustomField.all.sort
+    @custom_fields = IssueCustomField.sorted
   end
 end

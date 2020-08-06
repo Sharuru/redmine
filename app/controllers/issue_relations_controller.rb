@@ -1,5 +1,7 @@
+# frozen_string_literal: true
+
 # Redmine - project management software
-# Copyright (C) 2006-2017  Jean-Philippe Lang
+# Copyright (C) 2006-2020  Jean-Philippe Lang
 #
 # This program is free software; you can redistribute it and/or
 # modify it under the terms of the GNU General Public License
@@ -46,7 +48,13 @@ class IssueRelationsController < ApplicationController
     @relation.issue_from = @issue
     @relation.safe_attributes = params[:relation]
     @relation.init_journals(User.current)
-    saved = @relation.save
+
+    begin
+      saved = @relation.save
+    rescue ActiveRecord::RecordNotUnique
+      saved = false
+      @relation.errors.add :base, :taken
+    end
 
     respond_to do |format|
       format.html { redirect_to issue_path(@issue) }

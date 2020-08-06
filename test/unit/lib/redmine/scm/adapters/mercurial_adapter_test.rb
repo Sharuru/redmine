@@ -1,5 +1,7 @@
+# frozen_string_literal: true
+
 # Redmine - project management software
-# Copyright (C) 2006-2017  Jean-Philippe Lang
+# Copyright (C) 2006-2020  Jean-Philippe Lang
 #
 # This program is free software; you can redistribute it and/or
 # modify it under the terms of the GNU General Public License
@@ -21,9 +23,10 @@ class MercurialAdapterTest < ActiveSupport::TestCase
   HELPERS_DIR        = Redmine::Scm::Adapters::MercurialAdapter::HELPERS_DIR
   TEMPLATE_NAME      = Redmine::Scm::Adapters::MercurialAdapter::TEMPLATE_NAME
   TEMPLATE_EXTENSION = Redmine::Scm::Adapters::MercurialAdapter::TEMPLATE_EXTENSION
+  HgCommandAborted   = Redmine::Scm::Adapters::MercurialAdapter::HgCommandAborted
+  HgCommandArgumentError = Redmine::Scm::Adapters::MercurialAdapter::HgCommandArgumentError
 
   REPOSITORY_PATH = repository_path('mercurial')
-  CHAR_1_HEX = "\xc3\x9c"
 
   if File.directory?(REPOSITORY_PATH)
     def setup
@@ -38,12 +41,12 @@ class MercurialAdapterTest < ActiveSupport::TestCase
                             nil,
                             nil,
                             nil,
-                           'ISO-8859-1')
+                            'ISO-8859-1')
       @diff_c_support = true
-      @char_1        = CHAR_1_HEX.dup.force_encoding('UTF-8')
-      @tag_char_1    = "tag-#{CHAR_1_HEX}-00".force_encoding('UTF-8')
-      @branch_char_0 = "branch-#{CHAR_1_HEX}-00".force_encoding('UTF-8')
-      @branch_char_1 = "branch-#{CHAR_1_HEX}-01".force_encoding('UTF-8')
+      @char_1        = 'Ü'
+      @tag_char_1    = 'tag-Ü-00'
+      @branch_char_0 = 'branch-Ü-00'
+      @branch_char_1 = 'branch-Ü-01'
     end
 
     def test_hgversion
@@ -77,12 +80,12 @@ class MercurialAdapterTest < ActiveSupport::TestCase
 
     def test_info
       [REPOSITORY_PATH, REPOSITORY_PATH + "/",
-           REPOSITORY_PATH + "//"].each do |repo|
+       REPOSITORY_PATH + "//"].each do |repo|
         adp = Redmine::Scm::Adapters::MercurialAdapter.new(repo)
         repo_path =  adp.info.root_url.gsub(/\\/, "/")
         assert_equal REPOSITORY_PATH, repo_path
-        assert_equal '33', adp.info.lastrev.revision
-        assert_equal '2e6d546429230f377d7d19c2078abd2dd909f235',adp.info.lastrev.scmid
+        assert_equal '39', adp.info.lastrev.revision
+        assert_equal '04aed9840e9266e535f5f20f7e42c9f9f84f9cf4',adp.info.lastrev.scmid
       end
     end
 
@@ -98,6 +101,13 @@ class MercurialAdapterTest < ActiveSupport::TestCase
       assert_equal 2, revisions.size
       assert_equal '2', revisions[0].revision
       assert_equal '400bb86721098697c7d17b3724c794c57636de70', revisions[0].scmid
+    end
+
+    def test_ctrl_character
+      revisions = @adapter.revisions(nil, '619ebf674dab', '619ebf674dab')
+      assert_equal 1, revisions.size
+      assert_equal "ctrl-s\u0013user", revisions[0].author
+      assert_equal "ctrl-s\u0013message", revisions[0].message
     end
 
     def test_parents
@@ -316,11 +326,13 @@ class MercurialAdapterTest < ActiveSupport::TestCase
     end
 
     def test_tags
-      assert_equal [@tag_char_1, 'tag_test.00', 'tag-init-revision'], @adapter.tags
+      tags = ['double"quote"tag', @tag_char_1, 'tag_test.00', 'tag-init-revision']
+      assert_equal tags, @adapter.tags
     end
 
     def test_tagmap
       tm = {
+        'double"quote"tag'  => 'cf5f7c556f5a643e1ec7cb01775be539f64eeefb',
         @tag_char_1         => 'adf805632193500ad3b615cd04f58f9b0769f576',
         'tag_test.00'       => '6987191f453a5f6557018d522feea2c450d5588d',
         'tag-init-revision' => '0885933ad4f68d77c2649cd11f8311276e7ef7ce',
@@ -329,36 +341,62 @@ class MercurialAdapterTest < ActiveSupport::TestCase
     end
 
     def test_branches
-      brs = []
+      branches = []
       @adapter.branches.each do |b|
-        brs << b
+        branches << b
       end
-      assert_equal 7, brs.length
-      assert_equal 'default', brs[0].to_s
-      assert_equal '31', brs[0].revision
-      assert_equal '31eeee7395c8c78e66dd54c50addd078d10b2355', brs[0].scmid
-      assert_equal 'test-branch-01', brs[1].to_s
-      assert_equal '30', brs[1].revision
-      assert_equal 'ad4dc4f80284a4f9168b77e0b6de288e5d207ee7', brs[1].scmid
-      assert_equal @branch_char_1, brs[2].to_s
-      assert_equal '27', brs[2].revision
-      assert_equal '7bbf4c738e7145149d2e5eb1eed1d3a8ddd3b914', brs[2].scmid
-      assert_equal 'branch (1)[2]&,%.-3_4', brs[3].to_s
-      assert_equal '25', brs[3].revision
-      assert_equal 'afc61e85bde74de930e5846c8451bd55b5bafc9c', brs[3].scmid
-      assert_equal @branch_char_0, brs[4].to_s
-      assert_equal '23', brs[4].revision
-      assert_equal 'c8d3e4887474af6a589190140508037ebaa9d9c3', brs[4].scmid
-      assert_equal 'test_branch.latin-1', brs[5].to_s
-      assert_equal '22', brs[5].revision
-      assert_equal 'c2ffe7da686aa3d956e59f2a2854cf8980a8b768', brs[5].scmid
-      assert_equal 'test-branch-00', brs[6].to_s
-      assert_equal '13', brs[6].revision
-      assert_equal '3a330eb329586ea2adb3f83237c23310e744ebe9', brs[6].scmid
+      assert_equal 9, branches.length
+
+      branch = branches[-9]
+      assert_equal 'double"quote"branch', branch.to_s
+      assert_equal '39', branch.revision
+      assert_equal '04aed9840e9266e535f5f20f7e42c9f9f84f9cf4', branch.scmid
+
+      branch = branches[-8]
+      assert_equal 'issue-23055-ctrl-char', branch.to_s
+      assert_equal '35', branch.revision
+      assert_equal '3e998343166a1b8273973bcd46dd2bad74344d74', branch.scmid
+
+      branch = branches[-7]
+      assert_equal 'default', branch.to_s
+      assert_equal '31', branch.revision
+      assert_equal '31eeee7395c8c78e66dd54c50addd078d10b2355', branch.scmid
+
+      branch = branches[-6]
+      assert_equal 'test-branch-01', branch.to_s
+      assert_equal '30', branch.revision
+      assert_equal 'ad4dc4f80284a4f9168b77e0b6de288e5d207ee7', branch.scmid
+
+      branch = branches[-5]
+      assert_equal @branch_char_1, branch.to_s
+      assert_equal '27', branch.revision
+      assert_equal '7bbf4c738e7145149d2e5eb1eed1d3a8ddd3b914', branch.scmid
+
+      branch = branches[-4]
+      assert_equal 'branch (1)[2]&,%.-3_4', branch.to_s
+      assert_equal '25', branch.revision
+      assert_equal 'afc61e85bde74de930e5846c8451bd55b5bafc9c', branch.scmid
+
+      branch = branches[-3]
+      assert_equal @branch_char_0, branch.to_s
+      assert_equal '23', branch.revision
+      assert_equal 'c8d3e4887474af6a589190140508037ebaa9d9c3', branch.scmid
+
+      branch = branches[-2]
+      assert_equal 'test_branch.latin-1', branch.to_s
+      assert_equal '22', branch.revision
+      assert_equal 'c2ffe7da686aa3d956e59f2a2854cf8980a8b768', branch.scmid
+
+      branch = branches[-1]
+      assert_equal 'test-branch-00',branch.to_s
+      assert_equal '13', branch.revision
+      assert_equal '3a330eb329586ea2adb3f83237c23310e744ebe9', branch.scmid
     end
 
     def test_branchmap
       bm = {
+         'double"quote"branch'   => '04aed9840e9266e535f5f20f7e42c9f9f84f9cf4',
+         'issue-23055-ctrl-char' => '3e998343166a1b8273973bcd46dd2bad74344d74',
          'default'               => '31eeee7395c8c78e66dd54c50addd078d10b2355',
          'test_branch.latin-1'   => 'c2ffe7da686aa3d956e59f2a2854cf8980a8b768',
          'branch (1)[2]&,%.-3_4' => 'afc61e85bde74de930e5846c8451bd55b5bafc9c',
@@ -395,32 +433,33 @@ class MercurialAdapterTest < ActiveSupport::TestCase
     end
 
     def test_nodes_in_branch
-       [
-          'default',
-          @branch_char_1,
-          'branch (1)[2]&,%.-3_4',
-          @branch_char_0,
-          'test_branch.latin-1',
-          'test-branch-00',
-             ].each do |bra|
-        nib0 = @adapter.nodes_in_branch(bra)
+      [
+        'default',
+        @branch_char_1,
+        'branch (1)[2]&,%.-3_4',
+        @branch_char_0,
+        'test_branch.latin-1',
+        'test-branch-00',
+      ]
+      .each do |branch|
+        nib0 = @adapter.nodes_in_branch(branch)
         assert nib0
-        nib1 = @adapter.nodes_in_branch(bra, :limit => 1)
+        nib1 = @adapter.nodes_in_branch(branch, :limit => 1)
         assert_equal 1, nib1.size
-        case bra
-          when 'branch (1)[2]&,%.-3_4'
+        case branch
+        when 'branch (1)[2]&,%.-3_4'
             if @adapter.class.client_version_above?([1, 6])
               assert_equal 3, nib0.size
               assert_equal 'afc61e85bde74de930e5846c8451bd55b5bafc9c', nib0[0]
-              nib2 = @adapter.nodes_in_branch(bra, :limit => 2)
+              nib2 = @adapter.nodes_in_branch(branch, :limit => 2)
               assert_equal 2, nib2.size
               assert_equal '933ca60293d78f7c7979dd123cc0c02431683575', nib2[1]
             end
-          when @branch_char_1
+        when @branch_char_1
             if @adapter.class.client_version_above?([1, 6])
               assert_equal 2, nib0.size
               assert_equal '08ff3227303ec0dfcc818efa8e9cc652fe81859f', nib0[1]
-              nib2 = @adapter.nodes_in_branch(bra, :limit => 1)
+              nib2 = @adapter.nodes_in_branch(branch, :limit => 1)
               assert_equal 1, nib2.size
               assert_equal '7bbf4c738e7145149d2e5eb1eed1d3a8ddd3b914', nib2[0]
             end
@@ -441,6 +480,23 @@ class MercurialAdapterTest < ActiveSupport::TestCase
                                 ""
                               )
       assert_equal "UTF-8", adpt2.path_encoding
+    end
+
+    def test_bad_early_options
+      assert_nil @adapter.diff('sources/welcome_controller.rb',
+                               '--config=alias.rhdiff=!xterm')
+      assert_raise HgCommandArgumentError do
+        @adapter.entries('--debugger')
+      end
+      assert_raise HgCommandAborted do
+        @adapter.revisions(nil, nil, nil, limit: '--repo=otherrepo')
+      end
+      assert_raise HgCommandAborted do
+        @adapter.nodes_in_branch('default', limit: '--repository=otherrepo')
+      end
+      assert_raise HgCommandAborted do
+        @adapter.nodes_in_branch('-Rotherrepo')
+      end
     end
 
     private

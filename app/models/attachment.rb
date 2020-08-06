@@ -1,5 +1,7 @@
+# frozen_string_literal: true
+
 # Redmine - project management software
-# Copyright (C) 2006-2017  Jean-Philippe Lang
+# Copyright (C) 2006-2020  Jean-Philippe Lang
 #
 # This program is free software; you can redistribute it and/or
 # modify it under the terms of the GNU General Public License
@@ -17,6 +19,7 @@
 
 require "digest"
 require "fileutils"
+require "zip"
 
 class Attachment < ActiveRecord::Base
   include Redmine::SafeAttributes
@@ -85,14 +88,14 @@ class Attachment < ActiveRecord::Base
   def file=(incoming_file)
     unless incoming_file.nil?
       @temp_file = incoming_file
-        if @temp_file.respond_to?(:original_filename)
-          self.filename = @temp_file.original_filename
-          self.filename.force_encoding("UTF-8")
-        end
-        if @temp_file.respond_to?(:content_type)
-          self.content_type = @temp_file.content_type.to_s.chomp
-        end
-        self.filesize = @temp_file.size
+      if @temp_file.respond_to?(:original_filename)
+        self.filename = @temp_file.original_filename
+        self.filename.force_encoding("UTF-8")
+      end
+      if @temp_file.respond_to?(:content_type)
+        self.content_type = @temp_file.content_type.to_s.chomp
+      end
+      self.filesize = @temp_file.size
     end
   end
 
@@ -155,7 +158,7 @@ class Attachment < ActiveRecord::Base
   end
 
   def title
-    title = filename.to_s
+    title = filename.dup
     if description.present?
       title << " (#{description})"
     end
@@ -199,7 +202,9 @@ class Attachment < ActiveRecord::Base
   end
 
   def thumbnailable?
-    image?
+    Redmine::Thumbnail.convert_available? && (
+      image? || (is_pdf? && Redmine::Thumbnail.gs_available?)
+    )
   end
 
   # Returns the full path the attachment thumbnail, or nil
@@ -209,17 +214,17 @@ class Attachment < ActiveRecord::Base
       size = options[:size].to_i
       if size > 0
         # Limit the number of thumbnails per image
-        size = (size / 50) * 50
+        size = (size / 50.0).ceil * 50
         # Maximum thumbnail size
         size = 800 if size > 800
       else
         size = Setting.thumbnails_size.to_i
       end
       size = 100 unless size > 0
-      target = File.join(self.class.thumbnails_storage_path, "#{id}_#{digest}_#{size}.thumb")
+      target = thumbnail_path(size)
 
       begin
-        Redmine::Thumbnail.generate(self.diskfile, target, size)
+        Redmine::Thumbnail.generate(self.diskfile, target, size, is_pdf?)
       rescue => e
         logger.error "An error occured while generating thumbnail for #{disk_filename} to #{target}\nException was: #{e.message}" if logger
         return nil
@@ -235,7 +240,15 @@ class Attachment < ActiveRecord::Base
   end
 
   def is_text?
-    Redmine::MimeType.is_type?('text', filename)
+    Redmine::MimeType.is_type?('text', filename) || Redmine::SyntaxHighlighting.filename_supported?(filename)
+  end
+
+  def is_markdown?
+    Redmine::MimeType.of(filename) == 'text/markdown'
+  end
+
+  def is_textile?
+    Redmine::MimeType.of(filename) == 'text/x-textile'
   end
 
   def is_image?
@@ -243,15 +256,23 @@ class Attachment < ActiveRecord::Base
   end
 
   def is_diff?
-    self.filename =~ /\.(patch|diff)$/i
+    /\.(patch|diff)$/i.match?(filename)
   end
 
   def is_pdf?
     Redmine::MimeType.of(filename) == "application/pdf"
   end
 
+  def is_video?
+    Redmine::MimeType.is_type?('video', filename)
+  end
+
+  def is_audio?
+    Redmine::MimeType.is_type?('audio', filename)
+  end
+
   def previewable?
-    is_text? || is_image?
+    is_text? || is_image? || is_video? || is_audio?
   end
 
   # Returns true if the file is readable
@@ -268,7 +289,7 @@ class Attachment < ActiveRecord::Base
   def self.find_by_token(token)
     if token.to_s =~ /^(\d+)\.([0-9a-f]+)$/
       attachment_id, attachment_digest = $1, $2
-      attachment = Attachment.where(:id => attachment_id, :digest => attachment_digest).first
+      attachment = Attachment.find_by(:id => attachment_id, :digest => attachment_digest)
       if attachment && attachment.container.nil?
         attachment
       end
@@ -323,6 +344,33 @@ class Attachment < ActiveRecord::Base
 
   def self.prune(age=1.day)
     Attachment.where("created_on < ? AND (container_type IS NULL OR container_type = '')", Time.now - age).destroy_all
+  end
+
+  def self.archive_attachments(attachments)
+    attachments = attachments.select(&:readable?)
+    return nil if attachments.blank?
+
+    Zip.unicode_names = true
+    archived_file_names = []
+    buffer = Zip::OutputStream.write_buffer do |zos|
+      attachments.each do |attachment|
+        filename = attachment.filename
+        # rename the file if a file with the same name already exists
+        dup_count = 0
+        while archived_file_names.include?(filename)
+          dup_count += 1
+          extname = File.extname(attachment.filename)
+          basename = File.basename(attachment.filename, extname)
+          filename = "#{basename}(#{dup_count})#{extname}"
+        end
+        zos.put_next_entry(filename)
+        zos << IO.binread(attachment.diskfile)
+        archived_file_names << filename
+      end
+    end
+    buffer.string
+  ensure
+    buffer&.close
   end
 
   # Moves an existing attachment to its target directory
@@ -417,7 +465,6 @@ class Attachment < ActiveRecord::Base
 
   def reuse_existing_file_if_possible
     original_diskfile = nil
-
     reused = with_lock do
       if existing = Attachment
                       .where(digest: self.digest, filesize: self.filesize)
@@ -425,14 +472,11 @@ class Attachment < ActiveRecord::Base
                              self.id, self.disk_filename)
                       .first
         existing.with_lock do
-
           original_diskfile = self.diskfile
           existing_diskfile = existing.diskfile
-
           if File.readable?(original_diskfile) &&
             File.readable?(existing_diskfile) &&
             FileUtils.identical?(original_diskfile, existing_diskfile)
-
             self.update_columns disk_directory: existing.disk_directory,
                                 disk_filename: existing.disk_filename
           end
@@ -449,12 +493,19 @@ class Attachment < ActiveRecord::Base
     # anymore, thats why this is caught and ignored as well.
   end
 
-
   # Physically deletes the file from the file system
   def delete_from_disk!
     if disk_filename.present? && File.exist?(diskfile)
       File.delete(diskfile)
     end
+    Dir[thumbnail_path("*")].each do |thumb|
+      File.delete(thumb)
+    end
+  end
+
+  def thumbnail_path(size)
+    File.join(self.class.thumbnails_storage_path,
+              "#{digest}_#{filesize}_#{size}.thumb")
   end
 
   def sanitize_filename(value)
@@ -471,21 +522,25 @@ class Attachment < ActiveRecord::Base
     time.strftime("%Y/%m")
   end
 
-  # Returns an ASCII or hashed filename that do not
-  # exists yet in the given subdirectory
-  def self.disk_filename(filename, directory=nil)
-    timestamp = DateTime.now.strftime("%y%m%d%H%M%S")
-    ascii = ''
-    if filename =~ %r{^[a-zA-Z0-9_\.\-]*$} && filename.length <= 50
-      ascii = filename
-    else
-      ascii = Digest::MD5.hexdigest(filename)
-      # keep the extension if any
-      ascii << $1 if filename =~ %r{(\.[a-zA-Z0-9]+)$}
+  # Singleton class method is public
+  class << self
+    # Returns an ASCII or hashed filename that do not
+    # exists yet in the given subdirectory
+    def disk_filename(filename, directory=nil)
+      timestamp = DateTime.now.strftime("%y%m%d%H%M%S")
+      ascii = ''
+      if %r{^[a-zA-Z0-9_\.\-]*$}.match?(filename) && filename.length <= 50
+        ascii = filename
+      else
+        ascii = Digest::MD5.hexdigest(filename)
+        # keep the extension if any
+        ascii << $1 if filename =~ %r{(\.[a-zA-Z0-9]+)$}
+      end
+      while File.exist?(File.join(storage_path, directory.to_s,
+                                  "#{timestamp}_#{ascii}"))
+        timestamp.succ!
+      end
+      "#{timestamp}_#{ascii}"
     end
-    while File.exist?(File.join(storage_path, directory.to_s, "#{timestamp}_#{ascii}"))
-      timestamp.succ!
-    end
-    "#{timestamp}_#{ascii}"
   end
 end
